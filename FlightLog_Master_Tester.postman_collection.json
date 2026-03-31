@@ -255,7 +255,93 @@
 			]
 		},
 		{
-			"name": "5. System",
+			"name": "5. Flight Helper (Auto-Tracker)",
+			"item": [
+				{
+					"name": "Start/End Session",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"aircraft_id\": \"{{last_aircraft_id}}\",\n    \"route\": \"SAEZ - SADF\",\n    \"landings\": 3\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/flight-helper/session",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"flight-helper",
+								"session"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Shortcut Format (Text)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"aircraft_id\": \"{{last_aircraft_id}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/flight-helper/session?format=text",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"flight-helper",
+								"session"
+							],
+							"query": [
+								{
+									"key": "format",
+									"value": "text"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Check Active Session",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/flight-helper/session",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"flight-helper",
+								"session"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. System",
 			"item": [
 				{
 					"name": "Health Status",
