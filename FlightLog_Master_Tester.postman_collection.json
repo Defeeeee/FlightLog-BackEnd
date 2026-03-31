@@ -1,0 +1,282 @@
+{
+	"info": {
+		"_postman_id": "e1f2a3b4-c5d6-4e5f-a6b7-c8d9e0f1a2b3",
+		"name": "FlightLog Master Tester",
+		"description": "The definitive, comprehensive E2E testing suite for FlightLog API. Covers all endpoints for Auth, Profiles, Aircraft, and Flights.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Register New Pilot",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"var jsonData = pm.response.json();",
+									"if (jsonData.user_id) {",
+									"    pm.collectionVariables.set(\"user_id\", jsonData.user_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"pilot_{{$randomInt}}@example.com\",\n    \"password\": \"TestPass123!\",\n    \"first_name\": \"Pete\",\n    \"last_name\": \"Mitchell\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/auth/register", "host": ["{{base_url}}"], "path": ["api", "auth", "register"] }
+					}
+				},
+				{
+					"name": "Login and Capture Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Login Successful\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"var jsonData = pm.response.json();",
+									"pm.collectionVariables.set(\"jwt_token\", jsonData.access_token);",
+									"pm.collectionVariables.set(\"user_id\", jsonData.user_id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"maverick@topgun.com\",\n    \"password\": \"FlySafePassword1!\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/auth/login", "host": ["{{base_url}}"], "path": ["api", "auth", "login"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Profiles",
+			"item": [
+				{
+					"name": "List All Profiles (Internal)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/profiles", "host": ["{{base_url}}"], "path": ["api", "profiles"] }
+					}
+				},
+				{
+					"name": "Get My Profile",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/profiles/{{user_id}}", "host": ["{{base_url}}"], "path": ["api", "profiles", "{{user_id}}"] }
+					}
+				},
+				{
+					"name": "Update My Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"license_type\": \"PCA\",\n    \"cma_expiry\": \"2025-12-31\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/profiles/{{user_id}}", "host": ["{{base_url}}"], "path": ["api", "profiles", "{{user_id}}"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Aircraft",
+			"item": [
+				{
+					"name": "Add Aircraft",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.collectionVariables.set(\"last_aircraft_id\", jsonData.id);",
+									"pm.test(\"Aircraft Created\", function() { pm.response.to.have.status(201); });"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"registration\": \"LV-F{{$randomInt}}\",\n    \"icao\": \"C172\",\n    \"type\": \"Cessna 172 Skyhawk\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/aircraft", "host": ["{{base_url}}"], "path": ["api", "aircraft"] }
+					}
+				},
+				{
+					"name": "List My Aircraft",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/aircraft", "host": ["{{base_url}}"], "path": ["api", "aircraft"] }
+					}
+				},
+				{
+					"name": "Get Specific Aircraft",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/aircraft/{{last_aircraft_id}}", "host": ["{{base_url}}"], "path": ["api", "aircraft", "{{last_aircraft_id}}"] }
+					}
+				},
+				{
+					"name": "Update Aircraft",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"type\": \"Cessna 172S (G1000 NXi)\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/aircraft/{{last_aircraft_id}}", "host": ["{{base_url}}"], "path": ["api", "aircraft", "{{last_aircraft_id}}"] }
+					}
+				},
+				{
+					"name": "Delete Aircraft",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/aircraft/{{last_aircraft_id}}", "host": ["{{base_url}}"], "path": ["api", "aircraft", "{{last_aircraft_id}}"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Flights",
+			"item": [
+				{
+					"name": "Log New Flight",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.collectionVariables.set(\"last_flight_id\", jsonData.id);",
+									"pm.test(\"Flight Logged\", function() { pm.response.to.have.status(201); });"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"aircraft_id\": \"{{last_aircraft_id}}\",\n    \"date\": \"2024-03-31\",\n    \"route\": \"SAEZ - SADF\",\n    \"landings\": 3,\n    \"duration\": 1.5,\n    \"takeoff\": \"2024-03-31T14:00:00Z\",\n    \"landing\": \"2024-03-31T15:30:00Z\"\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/flights", "host": ["{{base_url}}"], "path": ["api", "flights"] }
+					}
+				},
+				{
+					"name": "Get Flight History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/flights", "host": ["{{base_url}}"], "path": ["api", "flights"] }
+					}
+				},
+				{
+					"name": "Get Specific Flight",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/flights/{{last_flight_id}}", "host": ["{{base_url}}"], "path": ["api", "flights", "{{last_flight_id}}"] }
+					}
+				},
+				{
+					"name": "Update Flight Log",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"route\": \"SAEZ - SABE\",\n    \"duration\": 1.8\n}",
+							"options": {
+								"raw": { "language": "json" }
+							}
+						},
+						"url": { "raw": "{{base_url}}/api/flights/{{last_flight_id}}", "host": ["{{base_url}}"], "path": ["api", "flights", "{{last_flight_id}}"] }
+					}
+				},
+				{
+					"name": "Delete Flight Log",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/flights/{{last_flight_id}}", "host": ["{{base_url}}"], "path": ["api", "flights", "{{last_flight_id}}"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "5. System",
+			"item": [
+				{
+					"name": "Health Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": { "raw": "{{base_url}}/api/health", "host": ["{{base_url}}"], "path": ["api", "health"] }
+					}
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [{ "key": "token", "value": "{{jwt_token}}", "type": "string" }]
+	},
+	"variable": [
+		{ "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+		{ "key": "jwt_token", "value": "", "type": "string" },
+		{ "key": "user_id", "value": "", "type": "string" },
+		{ "key": "last_aircraft_id", "value": "", "type": "string" },
+		{ "key": "last_flight_id", "value": "", "type": "string" }
+	]
+}
