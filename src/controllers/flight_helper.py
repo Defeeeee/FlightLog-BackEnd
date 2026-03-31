@@ -1,5 +1,5 @@
 from litestar import Controller, post, get, Request, Response, MediaType
-from litestar.exceptions import NotFoundException, BadRequestException
+from litestar.exceptions import NotFoundException, ValidationException
 from supabase import Client
 from datetime import datetime, timezone
 from typing import Optional, Any
@@ -55,7 +55,7 @@ class FlightHelperController(Controller):
         if not session_query.data:
             # START SESSION
             if not data or not data.aircraft_id:
-                raise BadRequestException("aircraft_id is required to start a session")
+                raise ValidationException("aircraft_id is required to start a session")
             
             start_data = {
                 "user_id": user_id,
