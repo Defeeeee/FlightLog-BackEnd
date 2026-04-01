@@ -45,9 +45,9 @@ class FlightsController(Controller):
         """Update a specific flight."""
         update_data = data.model_dump(exclude_unset=True)
         
-        # Format datetimes if they exist in the update payload
+        # Format datetimes and dates if they exist in the update payload
         if "date" in update_data and update_data["date"]:
-            update_data["date"] = update_data["date"].isoformat()
+            update_data["date"] = str(update_data["date"])
         if "takeoff" in update_data and update_data["takeoff"]:
             update_data["takeoff"] = update_data["takeoff"].isoformat()
         if "landing" in update_data and update_data["landing"]:
@@ -56,8 +56,10 @@ class FlightsController(Controller):
             update_data["aircraft_id"] = str(update_data["aircraft_id"])
 
         response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).execute()
+        
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")
+        
         return Flight(**response.data[0])
 
     @delete("/{flight_id:uuid}")
