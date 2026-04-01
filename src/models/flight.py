@@ -6,7 +6,7 @@ from uuid import UUID
 class Flight(BaseModel):
     id: UUID
     user_id: UUID
-    aircraft_id: UUID
+    aircraft_id: Optional[UUID] = None
     date: date
     route: str
     landings: int
@@ -17,7 +17,7 @@ class Flight(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class FlightCreate(BaseModel):
-    aircraft_id: UUID
+    aircraft_id: Optional[UUID] = None
     date: date
     route: str
     landings: int

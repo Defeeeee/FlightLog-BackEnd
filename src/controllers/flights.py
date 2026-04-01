@@ -34,7 +34,8 @@ class FlightsController(Controller):
         insert_data["date"] = insert_data["date"].isoformat()
         insert_data["takeoff"] = insert_data["takeoff"].isoformat()
         insert_data["landing"] = insert_data["landing"].isoformat()
-        insert_data["aircraft_id"] = str(insert_data["aircraft_id"])
+        if insert_data.get("aircraft_id"):
+            insert_data["aircraft_id"] = str(insert_data["aircraft_id"])
 
         response = supabase_client.table("flights").insert(insert_data).execute()
         return Flight(**response.data[0])
