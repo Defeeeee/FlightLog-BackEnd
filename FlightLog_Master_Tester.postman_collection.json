@@ -133,7 +133,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"registration\": \"LV-F{{$randomInt}}\",\n    \"icao\": \"C172\",\n    \"type\": \"Cessna 172 Skyhawk\"\n}",
+							"raw": "{\n    \"registration\": \"LV-F{{$randomInt}}\",\n    \"icao\": \"C172\",\n    \"type\": \"Cessna 172 Skyhawk\",\n    \"type_acft\": \"SEP\"\n}",
 							"options": {
 								"raw": { "language": "json" }
 							}
@@ -205,7 +205,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"aircraft_id\": \"{{last_aircraft_id}}\",\n    \"date\": \"2024-03-31\",\n    \"route\": \"SAEZ - SADF\",\n    \"landings\": 3,\n    \"duration\": 1.5,\n    \"takeoff\": \"2024-03-31T14:00:00Z\",\n    \"landing\": \"2024-03-31T15:30:00Z\"\n}",
+							"raw": "{\n    \"aircraft_id\": \"{{last_aircraft_id}}\",\n    \"date\": \"2024-03-31\",\n    \"route\": \"SAEZ - SADF\",\n    \"landings\": 3,\n    \"duration\": 1.5,\n    \"takeoff\": \"2024-03-31T14:00:00Z\",\n    \"landing\": \"2024-03-31T15:30:00Z\",\n    \"pic_day_loc\": 1.5,\n    \"IMC Pil\": 0.2\n}",
 							"options": {
 								"raw": { "language": "json" }
 							}

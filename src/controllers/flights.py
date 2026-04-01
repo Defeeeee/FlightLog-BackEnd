@@ -14,6 +14,7 @@ class FlightsController(Controller):
     async def list_flights(self, supabase_client: Client) -> List[Flight]:
         """Fetch all flights the current user has access to."""
         response = supabase_client.table("flights").select("*").execute()
+        # Pydantic's populate_by_name=True allows mapping DB names (with spaces) to model fields
         return [Flight(**data) for data in response.data]
 
     @get("/{flight_id:uuid}")
@@ -27,40 +28,23 @@ class FlightsController(Controller):
     @post()
     async def create_flight(self, request: Request, supabase_client: Client, data: FlightCreate) -> Flight:
         """Create a new flight record."""
-        insert_data = data.model_dump()
+        # Use mode="json" to serialize UUIDs, dates, etc., to strings
+        # and by_alias=True to use the database column names (with spaces)
+        insert_data = data.model_dump(by_alias=True, mode="json")
         insert_data["user_id"] = str(request.state.user.id)
         
-        # Serialize UUIDs, dates and datetimes
-        insert_data["date"] = insert_data["date"].isoformat()
-        insert_data["takeoff"] = insert_data["takeoff"].isoformat()
-        insert_data["landing"] = insert_data["landing"].isoformat()
-        if insert_data.get("aircraft_id"):
-            insert_data["aircraft_id"] = str(insert_data["aircraft_id"])
-
         response = supabase_client.table("flights").insert(insert_data).execute()
         return Flight(**response.data[0])
 
     @patch("/{flight_id:uuid}")
     async def update_flight(self, supabase_client: Client, flight_id: UUID, data: FlightUpdate) -> Flight:
         """Update a specific flight."""
-        update_data = data.model_dump(exclude_unset=True)
+        # Use mode="json" for serialization and by_alias=True for DB column names
+        update_data = data.model_dump(exclude_unset=True, by_alias=True, mode="json")
         
-        # Format datetimes and dates if they exist in the update payload
-        if "date" in update_data and update_data["date"]:
-            # We force it to a string for Supabase, whether it's a date object or string
-            update_data["date"] = str(update_data["date"])
-        if "takeoff" in update_data and update_data["takeoff"]:
-            update_data["takeoff"] = update_data["takeoff"].isoformat()
-        if "landing" in update_data and update_data["landing"]:
-            update_data["landing"] = update_data["landing"].isoformat()
-        if "aircraft_id" in update_data and update_data["aircraft_id"]:
-            update_data["aircraft_id"] = str(update_data["aircraft_id"])
-
         response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).execute()
-        
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")
-        
         return Flight(**response.data[0])
 
     @delete("/{flight_id:uuid}")

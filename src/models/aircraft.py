@@ -8,6 +8,7 @@ class Aircraft(BaseModel):
     registration: str
     icao: str
     type: str
+    type_acft: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -15,8 +16,10 @@ class AircraftCreate(BaseModel):
     registration: str
     icao: str
     type: str
+    type_acft: Optional[str] = None
 
 class AircraftUpdate(BaseModel):
     registration: Optional[str] = None
     icao: Optional[str] = None
     type: Optional[str] = None
+    type_acft: Optional[str] = None
