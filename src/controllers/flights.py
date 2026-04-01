@@ -47,6 +47,7 @@ class FlightsController(Controller):
         
         # Format datetimes and dates if they exist in the update payload
         if "date" in update_data and update_data["date"]:
+            # We force it to a string for Supabase, whether it's a date object or string
             update_data["date"] = str(update_data["date"])
         if "takeoff" in update_data and update_data["takeoff"]:
             update_data["takeoff"] = update_data["takeoff"].isoformat()
