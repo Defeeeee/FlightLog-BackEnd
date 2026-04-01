@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     # App Configuration
     app_name: str = "FlightLog API"
     debug: bool = True
-    allowed_origins: list[str] = ["*"] # Change this to your frontend URL in production
+    allowed_origins: list[str] = [
+        "http://localhost:3000",
+        "https://flightlog.fdiaznem.com.ar",
+        "https://api.flightlog.fdiaznem.com.ar",
+        "https://auth.flightlog.fdiaznem.com.ar"
+    ] # Change this to your frontend URL in production
     
     # Environment config
     model_config = SettingsConfigDict(
