@@ -1,6 +1,7 @@
 from litestar import Controller, post, status_codes
 from litestar.exceptions import InternalServerException, NotAuthorizedException, TooManyRequestsException
 from supabase import Client
+from src.supabase_client import SupabaseManager
 from src.models.auth import UserRegister, UserLogin, AuthResponse
 
 class AuthController(Controller):
