@@ -10,10 +10,9 @@ from src.controllers.aircraft import AircraftController
 from src.controllers.flights import FlightsController
 from src.controllers.auth import AuthController
 from src.controllers.flight_helper import FlightHelperController
+from src.controllers.flight_packs import FlightPacksController
 from src.auth.security import AuthHandler
 from src.config import settings
-
-from litestar.exceptions import HTTPException
 
 # 1. Global Exception Handler for a cleaner production response
 def internal_server_error_handler(request: Request, exc: Exception) -> Response:
@@ -52,7 +51,8 @@ api_router = Router(
         ProfilesController, 
         AircraftController, 
         FlightsController,
-        FlightHelperController
+        FlightHelperController,
+        FlightPacksController
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

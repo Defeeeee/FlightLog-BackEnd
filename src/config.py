@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     supabase_anon_key: str = Field(validation_alias="SUPABASE_PUBLISHABLE_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, validation_alias="SUPABASE_SERVICE_ROLE_KEY")
     
+    # Google OAuth Configuration
+    google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
+    google_client_secret: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")
+    google_callback_url: Optional[str] = Field(default=None, validation_alias="GOOGLE_CALLBACK_URL")
+    
     # App Configuration
     app_name: str = "FlightLog API"
     debug: bool = True

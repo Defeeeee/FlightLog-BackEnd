@@ -14,3 +14,9 @@ class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
     user_id: str
+
+class PasswordRecover(BaseModel):
+    email: EmailStr
+
+class PasswordUpdate(BaseModel):
+    password: str
