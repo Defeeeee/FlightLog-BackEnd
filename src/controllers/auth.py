@@ -17,7 +17,8 @@ class AuthController(Controller):
             auth_response = supabase_client.auth.sign_in_with_oauth({
                 "provider": "google",
                 "options": {
-                    "redirectTo": "https://vector.fdiaznem.com.ar/auth/callback"
+                    "redirectTo": "https://vector.fdiaznem.com.ar/auth/callback",
+                    "queryParams": {"prompt": "select_account"}
                 }
             })
             return {"url": auth_response.url}

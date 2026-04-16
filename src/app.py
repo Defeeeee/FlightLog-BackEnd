@@ -3,6 +3,7 @@ from litestar.di import Provide
 from litestar.config.cors import CORSConfig
 from litestar.openapi import OpenAPIConfig
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
+from litestar.exceptions import HTTPException
 
 from src.controllers.health import HealthController
 from src.controllers.profiles import ProfilesController
@@ -11,12 +12,17 @@ from src.controllers.flights import FlightsController
 from src.controllers.auth import AuthController
 from src.controllers.flight_helper import FlightHelperController
 from src.controllers.flight_packs import FlightPacksController
+from src.controllers.dashboard import DashboardController
 from src.auth.security import AuthHandler
 from src.config import settings
 
 # 1. Global Exception Handler for a cleaner production response
 def internal_server_error_handler(request: Request, exc: Exception) -> Response:
     """Handles unexpected server errors gracefully."""
+    print(f"!!! CRITICAL ERROR at {request.url.path}: {str(exc)}")
+    import traceback
+    traceback.print_exc()
+
     # If the exception is a standard Litestar HTTP error, we let it through
     if isinstance(exc, HTTPException):
         return Response(
@@ -52,7 +58,8 @@ api_router = Router(
         AircraftController, 
         FlightsController,
         FlightHelperController,
-        FlightPacksController
+        FlightPacksController,
+        DashboardController
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)
