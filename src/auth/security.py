@@ -20,12 +20,16 @@ class AuthHandler:
     async def provide_supabase_client(cls, request: Request) -> Client:
         """
         Dependency Injection Provider: Returns a client configured for RLS 
-        if a valid JWT is present (set by the guard); otherwise returns an anonymous client.
+        if a valid JWT is present (set by the guard); otherwise returns 
+        the service client (if authenticated via X-API-Key) or the anonymous client.
         """
         # If the guard already verified the user, use that token for RLS
         token = cls.extract_bearer_token(request)
         
         if not token:
+            # Check if authenticated via X-API-Key (which sets connection.state.user in guard)
+            if hasattr(request.state, "user") and request.state.user:
+                return SupabaseManager.get_service_client()
             return SupabaseManager.get_base_client()
 
         return SupabaseManager.get_user_scoped_client(access_token=token)
