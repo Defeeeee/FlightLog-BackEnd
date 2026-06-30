@@ -1,7 +1,8 @@
-from litestar import Controller, get, post, Request
-from litestar.exceptions import ValidationException
+from litestar import Controller, get, post, delete, Request
+from litestar.exceptions import ValidationException, NotFoundException, PermissionDeniedException
 from supabase import Client
-from typing import List
+from typing import List, Dict, Any
+from uuid import UUID
 from src.models.transaction import Transaction, TransactionCreate
 from src.auth.guards import auth_guard
 
@@ -35,3 +36,17 @@ class TransactionsController(Controller):
 
         response = supabase_client.table("transactions").insert(insert_data).execute()
         return Transaction(**response.data[0])
+
+    @delete("/{transaction_id:uuid}")
+    async def delete_transaction(self, request: Request, supabase_client: Client, transaction_id: UUID) -> Dict[str, Any]:
+        """Delete a specific transaction."""
+        user_id = str(request.state.user.id)
+        # Check ownership
+        tx_resp = supabase_client.table("transactions").select("user_id").eq("id", str(transaction_id)).execute()
+        if not tx_resp.data:
+            raise NotFoundException("Transacción no encontrada")
+        if tx_resp.data[0]["user_id"] != user_id:
+            raise PermissionDeniedException("No tienes permiso para eliminar esta transacción")
+
+        supabase_client.table("transactions").delete().eq("id", str(transaction_id)).execute()
+        return {"success": True}
