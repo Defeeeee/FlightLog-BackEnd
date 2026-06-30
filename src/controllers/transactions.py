@@ -18,16 +18,19 @@ class TransactionsController(Controller):
 
     @post("/deposit")
     async def create_deposit(self, request: Request, supabase_client: Client, data: TransactionCreate) -> Transaction:
-        """Create a new deposit transaction."""
+        """Create a new deposit or withdrawal transaction."""
         user_id = str(request.state.user.id)
-        if data.amount <= 0:
-            raise ValidationException("El monto del depósito debe ser mayor a cero.")
+        if data.amount == 0:
+            raise ValidationException("El monto de la transacción no puede ser cero.")
+
+        tx_type = "deposit" if data.amount > 0 else "charge"
+        default_desc = "Carga de saldo" if data.amount > 0 else "Retiro de saldo"
 
         insert_data = {
             "user_id": user_id,
             "amount": float(data.amount),
-            "type": "deposit",
-            "description": data.description or "Carga de saldo",
+            "type": tx_type,
+            "description": data.description or default_desc,
         }
 
         response = supabase_client.table("transactions").insert(insert_data).execute()
