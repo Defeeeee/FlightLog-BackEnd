@@ -66,7 +66,7 @@ class FlightPacksController(Controller):
             pack = FlightPack(
                 **data,
                 aircraft_ids=[UUID(aid) for aid in aids],
-                remaining_hours=max(0.0, float(data["total_hours"]) - used_hours)
+                remaining_hours=float(data["total_hours"]) - used_hours
             )
             packs.append(pack)
         
@@ -109,7 +109,7 @@ class FlightPacksController(Controller):
         return FlightPack(
             **new_pack_data,
             aircraft_ids=data.aircraft_ids,
-            remaining_hours=max(0.0, float(new_pack_data["total_hours"]) - used_hours)
+            remaining_hours=float(new_pack_data["total_hours"]) - used_hours
         )
 
     @patch("/{pack_id:uuid}")
@@ -155,7 +155,7 @@ class FlightPacksController(Controller):
         return FlightPack(
             **updated_pack_data,
             aircraft_ids=aircraft_ids,
-            remaining_hours=max(0.0, float(updated_pack_data["total_hours"]) - used_hours)
+            remaining_hours=float(updated_pack_data["total_hours"]) - used_hours
         )
 
 
