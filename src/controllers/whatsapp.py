@@ -26,6 +26,8 @@ class WhatsAppController(Controller):
         
         # Normalize phone (digits only)
         clean_phone = "".join(c for c in phone if c.isdigit())
+        print(f"[DEBUG WHATSAPP] Fetching user data for phone: {phone} (clean: {clean_phone})")
+        print(f"[DEBUG WHATSAPP] Service role key configured: {bool(settings.supabase_service_role_key)}")
         if not clean_phone:
             raise NotFoundException("Número de teléfono inválido")
 
@@ -41,6 +43,7 @@ class WhatsAppController(Controller):
                 profile_resp = service_client.table("profiles").select("*").eq("whatsapp_phone", alt_phone).execute()
 
         if not profile_resp.data:
+            print(f"[DEBUG WHATSAPP] Profile query returned no data for phone: {clean_phone}")
             raise NotFoundException("Usuario no registrado con ese número de WhatsApp")
 
         profile = profile_resp.data[0]
