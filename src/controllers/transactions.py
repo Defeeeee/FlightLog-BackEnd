@@ -38,7 +38,7 @@ class TransactionsController(Controller):
         return Transaction(**response.data[0])
 
     @delete("/{transaction_id:uuid}")
-    async def delete_transaction(self, request: Request, supabase_client: Client, transaction_id: UUID) -> Dict[str, Any]:
+    async def delete_transaction(self, request: Request, supabase_client: Client, transaction_id: UUID) -> None:
         """Delete a specific transaction."""
         user_id = str(request.state.user.id)
         # Check ownership
@@ -49,4 +49,3 @@ class TransactionsController(Controller):
             raise PermissionDeniedException("No tienes permiso para eliminar esta transacción")
 
         supabase_client.table("transactions").delete().eq("id", str(transaction_id)).execute()
-        return {"success": True}
