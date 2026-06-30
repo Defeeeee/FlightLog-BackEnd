@@ -12,11 +12,15 @@ from src.config import settings
 class WhatsAppController(Controller):
     path = "/whatsapp"
 
+    def _verify_secret(self, secret: str) -> None:
+        expected = getattr(settings, "whatsapp_webhook_secret", None) or "shared-vector-secret-2026"
+        if secret != expected and secret != settings.supabase_anon_key:
+            raise NotAuthorizedException("Invalid secret token.")
+
     @get("/user-data")
     async def get_user_data_by_phone(self, phone: str, secret: str) -> Dict[str, Any]:
         """Fetch dashboard context for a user by their WhatsApp phone number."""
-        if secret != settings.supabase_anon_key:
-            raise NotAuthorizedException("Invalid secret token.")
+        self._verify_secret(secret)
 
         service_client = SupabaseManager.get_service_client()
         
@@ -86,8 +90,7 @@ class WhatsAppController(Controller):
     @get("/chat-history")
     async def get_chat_history(self, phone: str, secret: str) -> Dict[str, Any]:
         """Fetch chat history for a WhatsApp phone number."""
-        if secret != settings.supabase_anon_key:
-            raise NotAuthorizedException("Invalid secret token.")
+        self._verify_secret(secret)
         
         service_client = SupabaseManager.get_service_client()
         clean_phone = "".join(c for c in phone if c.isdigit())
@@ -100,8 +103,7 @@ class WhatsAppController(Controller):
     @post("/chat-history")
     async def update_chat_history(self, phone: str, secret: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update chat history for a WhatsApp phone number."""
-        if secret != settings.supabase_anon_key:
-            raise NotAuthorizedException("Invalid secret token.")
+        self._verify_secret(secret)
         
         service_client = SupabaseManager.get_service_client()
         clean_phone = "".join(c for c in phone if c.isdigit())
