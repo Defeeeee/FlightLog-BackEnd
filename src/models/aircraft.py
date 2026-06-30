@@ -9,6 +9,7 @@ class Aircraft(BaseModel):
     icao: str
     type: str
     type_acft: Optional[str] = None
+    cost_per_hour: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -17,9 +18,11 @@ class AircraftCreate(BaseModel):
     icao: str
     type: str
     type_acft: Optional[str] = None
+    cost_per_hour: Optional[float] = None
 
 class AircraftUpdate(BaseModel):
     registration: Optional[str] = None
     icao: Optional[str] = None
     type: Optional[str] = None
     type_acft: Optional[str] = None
+    cost_per_hour: Optional[float] = None

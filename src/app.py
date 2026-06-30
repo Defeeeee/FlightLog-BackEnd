@@ -13,6 +13,7 @@ from src.controllers.auth import AuthController
 from src.controllers.flight_helper import FlightHelperController
 from src.controllers.flight_packs import FlightPacksController
 from src.controllers.dashboard import DashboardController
+from src.controllers.transactions import TransactionsController
 from src.auth.security import AuthHandler
 from src.config import settings
 
@@ -59,7 +60,8 @@ api_router = Router(
         FlightsController,
         FlightHelperController,
         FlightPacksController,
-        DashboardController
+        DashboardController,
+        TransactionsController
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

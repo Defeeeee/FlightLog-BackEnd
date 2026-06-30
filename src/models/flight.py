@@ -30,6 +30,10 @@ class Flight(BaseModel):
     capota: Optional[float] = Field(default=None, alias="Capota")
     sim_instructor: Optional[float] = Field(default=None, alias="Sim Instructor")
     sim_pil_en_inst: Optional[float] = Field(default=None, alias="Sim Pil en Inst")
+    
+    # Discount columns
+    discount_type: Optional[str] = None
+    discount_amount: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -58,6 +62,9 @@ class FlightCreate(BaseModel):
     sim_instructor: Optional[float] = Field(default=None, alias="Sim Instructor")
     sim_pil_en_inst: Optional[float] = Field(default=None, alias="Sim Pil en Inst")
     
+    discount_type: Optional[str] = None
+    discount_amount: Optional[float] = None
+    
     model_config = ConfigDict(populate_by_name=True)
 
 class FlightUpdate(BaseModel):
@@ -85,5 +92,8 @@ class FlightUpdate(BaseModel):
     capota: Optional[float] = Field(default=None, alias="Capota")
     sim_instructor: Optional[float] = Field(default=None, alias="Sim Instructor")
     sim_pil_en_inst: Optional[float] = Field(default=None, alias="Sim Pil en Inst")
+    
+    discount_type: Optional[str] = None
+    discount_amount: Optional[float] = None
 
     model_config = ConfigDict(populate_by_name=True)

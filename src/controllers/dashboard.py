@@ -4,6 +4,7 @@ from typing import Dict, Any
 from src.auth.guards import auth_guard
 from src.controllers.flight_packs import FlightPacksController
 from src.models.flight import Flight
+from src.models.transaction import Transaction
 
 class DashboardController(Controller):
     path = "/dashboard"
@@ -38,10 +39,22 @@ class DashboardController(Controller):
         except Exception as e:
             print(f"Consolidated dashboard packs error: {str(e)}")
             
+        # 6. Transactions & Balance
+        transactions_data = []
+        balance = 0.0
+        try:
+            transactions_resp = supabase_client.table("transactions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+            transactions_data = [Transaction(**tx).model_dump(mode="json") for tx in transactions_resp.data]
+            balance = sum(tx["amount"] for tx in transactions_data)
+        except Exception as e:
+            print(f"Consolidated dashboard transactions error: {str(e)}")
+
         return {
             "profile": profile,
             "aircraft": aircraft,
             "flights": flights,
             "session": {"active": bool(session_data), "session": session_data},
-            "packs": packs_data
+            "packs": packs_data,
+            "transactions": transactions_data,
+            "balance": balance
         }
