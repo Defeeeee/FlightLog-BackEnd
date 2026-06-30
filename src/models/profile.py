@@ -11,6 +11,7 @@ class Profile(BaseModel):
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
+    whatsapp_phone: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -21,6 +22,7 @@ class ProfileCreate(BaseModel):
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
+    whatsapp_phone: Optional[str] = None
 
 class ProfileUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -29,3 +31,4 @@ class ProfileUpdate(BaseModel):
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
+    whatsapp_phone: Optional[str] = None

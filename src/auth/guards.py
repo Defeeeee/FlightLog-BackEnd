@@ -9,20 +9,54 @@ from src.supabase_client import SupabaseManager
 # Simple in-memory cache for verified tokens to speed up parallel requests
 # Key: token, Value: (user_obj, expiry_timestamp)
 TOKEN_CACHE: Dict[str, Tuple[any, float]] = {}
+# Key: api_key, Value: (user_obj, expiry_timestamp)
+API_KEY_CACHE: Dict[str, Tuple[any, float]] = {}
 CACHE_TTL = 10  # Seconds
+
+class SimpleUser:
+    def __init__(self, user_id: str):
+        self.id = user_id
 
 async def auth_guard(connection: Request, _: BaseRouteHandler) -> None:
     """
     Guard that ensures the request has been authenticated.
-    Uses an in-memory cache to avoid redundant get_user() calls for parallel requests.
+    Supports Bearer Token (JWT) or X-API-Key header.
     """
     token = AuthHandler.extract_bearer_token(connection)
+    now = time.time()
     
     if not token:
-        raise NotAuthorizedException("This endpoint requires an active session.")
+        # Fallback to X-API-Key authentication
+        api_key = connection.headers.get("X-API-Key") or connection.query_params.get("api_key")
+        if not api_key:
+            raise NotAuthorizedException("This endpoint requires an active session or a valid X-API-Key.")
 
-    # Check cache first
-    now = time.time()
+        # Check API key cache
+        if api_key in API_KEY_CACHE:
+            user, expiry = API_KEY_CACHE[api_key]
+            if now < expiry:
+                connection.state.user = user
+                return
+            else:
+                del API_KEY_CACHE[api_key]
+
+        try:
+            service_client = SupabaseManager.get_service_client()
+            profile_resp = service_client.table("profiles").select("id").eq("api_key", api_key).execute()
+            if not profile_resp.data:
+                raise NotAuthorizedException("Invalid API Key.")
+            
+            user_id = profile_resp.data[0]["id"]
+            user = SimpleUser(user_id)
+            
+            # Cache the API key
+            API_KEY_CACHE[api_key] = (user, now + CACHE_TTL)
+            connection.state.user = user
+            return
+        except Exception as exc:
+            raise NotAuthorizedException("Invalid API Key.") from exc
+
+    # Bearer Token flow
     if token in TOKEN_CACHE:
         user, expiry = TOKEN_CACHE[token]
         if now < expiry:
