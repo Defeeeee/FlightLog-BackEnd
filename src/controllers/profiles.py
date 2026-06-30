@@ -1,4 +1,4 @@
-from litestar import Controller, get, patch, Request
+from litestar import Controller, get, patch, Request, post
 from litestar.exceptions import NotFoundException
 from supabase import Client
 from typing import List
@@ -57,4 +57,15 @@ class ProfilesController(Controller):
         response = supabase_client.table("profiles").update(update_data).eq("id", str(profile_id)).execute()
         if not response.data:
             raise NotFoundException(f"Profile with ID {profile_id} not found or you don't have permission to update it")
+        return Profile(**response.data[0])
+
+    @post("/apikey/regenerate")
+    async def regenerate_api_key(self, request: Request, supabase_client: Client) -> Profile:
+        """Regenerate the user's API key."""
+        user_id = str(request.state.user.id)
+        import uuid
+        new_key = str(uuid.uuid4())
+        response = supabase_client.table("profiles").update({"api_key": new_key}).eq("id", user_id).execute()
+        if not response.data:
+            raise NotFoundException("Profile not found")
         return Profile(**response.data[0])

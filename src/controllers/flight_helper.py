@@ -6,6 +6,7 @@ from typing import Optional, Any
 from uuid import UUID
 from src.auth.guards import auth_guard
 from src.models.flight_helper import FlightSessionStart, FlightSessionResponse
+from src.supabase_client import SupabaseManager
 
 class FlightHelperController(Controller):
     path = "/flight-helper"
@@ -104,3 +105,106 @@ class FlightHelperController(Controller):
             return {"active": False}
         
         return {"active": True, "session": session_query.data[0]}
+
+    @post("/session/shortcut", guards=[])
+    async def toggle_session_shortcut(self, request: Request) -> Any:
+        """iOS Shortcut endpoint to toggle starting/stopping a flight session."""
+        api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        if not api_key:
+            raise ValidationException("API Key (X-API-Key header or api_key query param) is required.")
+
+        service_client = SupabaseManager.get_service_client()
+        
+        profile_resp = service_client.table("profiles").select("id").eq("api_key", api_key).execute()
+        if not profile_resp.data:
+            raise ValidationException("Invalid API Key.")
+        
+        user_id = profile_resp.data[0]["id"]
+        now_utc = datetime.now(timezone.utc)
+
+        session_query = service_client.table("flight_sessions").select("*").eq("user_id", user_id).execute()
+
+        if not session_query.data:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+
+            aircraft_input = body.get("aircraft") or request.query_params.get("aircraft")
+            if not aircraft_input:
+                raise ValidationException("aircraft registration or ID is required to start a session.")
+
+            route = body.get("route") or request.query_params.get("route")
+            landings = body.get("landings") or request.query_params.get("landings") or 1
+
+            acft_resp = service_client.table("aircraft")\
+                .select("id, registration")\
+                .eq("user_id", user_id)\
+                .ilike("registration", aircraft_input.strip())\
+                .execute()
+            
+            if not acft_resp.data:
+                acft_resp = service_client.table("aircraft")\
+                    .select("id, registration")\
+                    .eq("user_id", user_id)\
+                    .eq("id", aircraft_input.strip())\
+                    .execute()
+
+            if not acft_resp.data:
+                raise ValidationException(f"Aircraft '{aircraft_input}' not found.")
+
+            acft = acft_resp.data[0]
+            aircraft_id = acft["id"]
+            reg = acft["registration"]
+
+            start_data = {
+                "user_id": user_id,
+                "aircraft_id": aircraft_id,
+                "start_time": now_utc.isoformat(),
+                "route": route,
+                "landings": landings
+            }
+            service_client.table("flight_sessions").insert(start_data).execute()
+
+            return {
+                "active": True,
+                "message": f"Vuelo INICIADO con éxito en la aeronave {reg}.",
+                "aircraft": reg,
+                "start_time": now_utc.isoformat()
+            }
+        else:
+            session = session_query.data[0]
+            start_time = datetime.fromisoformat(session["start_time"].replace("Z", "+00:00"))
+            
+            duration_delta = now_utc - start_time
+            total_minutes = duration_delta.total_seconds() / 60
+            hours_decimal = total_minutes // 60 + self.format_flight_hours(total_minutes % 60)
+            
+            service_client.table("flight_sessions").delete().eq("user_id", user_id).execute()
+
+            acft_resp = service_client.table("aircraft").select("registration").eq("id", session["aircraft_id"]).execute()
+            reg = acft_resp.data[0]["registration"] if acft_resp.data else "Avión"
+
+            takeoff_str = start_time.strftime("%H:%M")
+            landing_str = now_utc.strftime("%H:%M")
+            date_str = start_time.strftime("%Y-%m-%d")
+            
+            base_url = "https://vector.fdiaznem.com.ar"
+            link = (
+                f"{base_url}/dashboard/log-flight?"
+                f"prefill=true&"
+                f"aircraft_id={session['aircraft_id']}&"
+                f"takeoff={takeoff_str}&"
+                f"landing={landing_str}&"
+                f"date={date_str}&"
+                f"route={session.get('route') or ''}&"
+                f"landings={session.get('landings') or 1}&"
+                f"duration={hours_decimal:.1f}"
+            )
+
+            return {
+                "active": False,
+                "message": f"Vuelo FINALIZADO en {reg}. Tiempo de vuelo: {hours_decimal:.1f} hs.",
+                "duration": hours_decimal,
+                "link": link
+            }

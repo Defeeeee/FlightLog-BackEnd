@@ -10,6 +10,7 @@ class Profile(BaseModel):
     license_type: Optional[str] = None
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
+    api_key: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -19,6 +20,7 @@ class ProfileCreate(BaseModel):
     license_type: Optional[str] = None
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
+    api_key: Optional[UUID] = None
 
 class ProfileUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -26,3 +28,4 @@ class ProfileUpdate(BaseModel):
     license_type: Optional[str] = None
     cma_expiry: Optional[date] = None
     tracking_mode: Optional[str] = None
+    api_key: Optional[UUID] = None
