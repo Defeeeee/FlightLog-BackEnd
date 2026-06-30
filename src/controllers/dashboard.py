@@ -3,6 +3,7 @@ from supabase import Client
 from typing import Dict, Any
 from src.auth.guards import auth_guard
 from src.controllers.flight_packs import FlightPacksController
+from src.models.flight import Flight
 
 class DashboardController(Controller):
     path = "/dashboard"
@@ -23,7 +24,7 @@ class DashboardController(Controller):
         
         # 3. Flights
         flights_resp = supabase_client.table("flights").select("*").execute()
-        flights = flights_resp.data
+        flights = [Flight(**data).model_dump(mode="json") for data in flights_resp.data]
         
         # 4. Active Session
         session_resp = supabase_client.table("flight_sessions").select("*").eq("user_id", user_id).execute()

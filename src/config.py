@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     debug: bool = True
     allowed_origins: list[str] = [
         "http://localhost:3000",
+        "http://localhost:8081",
+        "http://localhost:8082",
         "https://vector.fdiaznem.com.ar",
         "https://flightlog.fdiaznem.com.ar",
         "https://api.flightlog.fdiaznem.com.ar",
