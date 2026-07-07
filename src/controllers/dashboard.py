@@ -20,11 +20,11 @@ class DashboardController(Controller):
         profile = profile_resp.data[0] if profile_resp.data else None
         
         # 2. Aircraft
-        aircraft_resp = supabase_client.table("aircraft").select("*").execute()
+        aircraft_resp = supabase_client.table("aircraft").select("*").eq("user_id", user_id).execute()
         aircraft = aircraft_resp.data
-        
+
         # 3. Flights
-        flights_resp = supabase_client.table("flights").select("*").execute()
+        flights_resp = supabase_client.table("flights").select("*").eq("user_id", user_id).execute()
         flights = [Flight(**data).model_dump(mode="json") for data in flights_resp.data]
         
         # 4. Active Session

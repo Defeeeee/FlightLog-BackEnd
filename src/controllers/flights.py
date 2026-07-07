@@ -71,16 +71,18 @@ class FlightsController(Controller):
             supabase_client.table("transactions").insert(tx_data).execute()
 
     @get()
-    async def list_flights(self, supabase_client: Client) -> List[Flight]:
-        """Fetch all flights the current user has access to."""
-        response = supabase_client.table("flights").select("*").execute()
+    async def list_flights(self, request: Request, supabase_client: Client) -> List[Flight]:
+        """Fetch all flights belonging to the authenticated user."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("flights").select("*").eq("user_id", user_id).execute()
         # Pydantic's populate_by_name=True allows mapping DB names (with spaces) to model fields
         return [Flight(**data) for data in response.data]
 
     @get("/{flight_id:uuid}")
-    async def get_flight(self, supabase_client: Client, flight_id: UUID) -> Flight:
-        """Fetch a specific flight by ID."""
-        response = supabase_client.table("flights").select("*").eq("id", str(flight_id)).execute()
+    async def get_flight(self, request: Request, supabase_client: Client, flight_id: UUID) -> Flight:
+        """Fetch a specific flight by ID, scoped to the authenticated user."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("flights").select("*").eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found")
         return Flight(**response.data[0])
@@ -110,12 +112,13 @@ class FlightsController(Controller):
         return flight_obj
 
     @patch("/{flight_id:uuid}")
-    async def update_flight(self, supabase_client: Client, flight_id: UUID, data: FlightUpdate) -> Flight:
+    async def update_flight(self, request: Request, supabase_client: Client, flight_id: UUID, data: FlightUpdate) -> Flight:
         """Update a specific flight."""
+        user_id = str(request.state.user.id)
         # Use mode="json" for serialization and by_alias=True for DB column names
         update_data = data.model_dump(exclude_unset=True, by_alias=True, mode="json")
-        
-        response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).execute()
+
+        response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")
         flight_obj = Flight(**response.data[0])
@@ -134,8 +137,9 @@ class FlightsController(Controller):
         return flight_obj
 
     @delete("/{flight_id:uuid}")
-    async def delete_flight(self, supabase_client: Client, flight_id: UUID) -> None:
+    async def delete_flight(self, request: Request, supabase_client: Client, flight_id: UUID) -> None:
         """Delete a specific flight."""
-        response = supabase_client.table("flights").delete().eq("id", str(flight_id)).execute()
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("flights").delete().eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")

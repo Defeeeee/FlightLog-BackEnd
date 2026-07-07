@@ -11,10 +11,11 @@ class ProfilesController(Controller):
     guards = [auth_guard]
 
     @get()
-    async def get_profiles(self, supabase_client: Client) -> List[Profile]:
-        """Fetch all profiles the current user has access to. Auto-creates one if missing."""
-        response = supabase_client.table("profiles").select("*").execute()
-        
+    async def get_profiles(self, request: Request, supabase_client: Client) -> List[Profile]:
+        """Fetch the authenticated user's own profile. Auto-creates one if missing."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("profiles").select("*").eq("id", user_id).execute()
+
         if not response.data:
             # If no profile exists, create a default one for this user
             try:
@@ -32,29 +33,31 @@ class ProfilesController(Controller):
                     # Insert the new profile
                     supabase_client.table("profiles").insert(new_profile).execute()
                     # Re-fetch
-                    response = supabase_client.table("profiles").select("*").execute()
+                    response = supabase_client.table("profiles").select("*").eq("id", user_id).execute()
             except Exception as e:
                 print(f"Auto-profile creation failed: {str(e)}")
-        
+
         return [Profile(**data) for data in response.data]
 
     @get("/{profile_id:uuid}")
-    async def get_profile(self, supabase_client: Client, profile_id: UUID) -> Profile:
-        """Fetch a specific profile by ID."""
-        response = supabase_client.table("profiles").select("*").eq("id", str(profile_id)).execute()
+    async def get_profile(self, request: Request, supabase_client: Client, profile_id: UUID) -> Profile:
+        """Fetch a specific profile by ID. Users may only access their own profile."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("profiles").select("*").eq("id", str(profile_id)).eq("id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Profile with ID {profile_id} not found")
         return Profile(**response.data[0])
 
     @patch("/{profile_id:uuid}")
-    async def update_profile(self, supabase_client: Client, profile_id: UUID, data: ProfileUpdate) -> Profile:
-        """Update a specific profile."""
+    async def update_profile(self, request: Request, supabase_client: Client, profile_id: UUID, data: ProfileUpdate) -> Profile:
+        """Update a specific profile. Users may only update their own profile."""
+        user_id = str(request.state.user.id)
         update_data = data.model_dump(exclude_unset=True)
         # Dates need to be converted to ISO format strings for Supabase JSON serialization
         if "cma_expiry" in update_data and update_data["cma_expiry"]:
             update_data["cma_expiry"] = update_data["cma_expiry"].isoformat()
 
-        response = supabase_client.table("profiles").update(update_data).eq("id", str(profile_id)).execute()
+        response = supabase_client.table("profiles").update(update_data).eq("id", str(profile_id)).eq("id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Profile with ID {profile_id} not found or you don't have permission to update it")
         return Profile(**response.data[0])

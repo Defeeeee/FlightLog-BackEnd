@@ -11,15 +11,17 @@ class AircraftController(Controller):
     guards = [auth_guard]
 
     @get()
-    async def list_aircraft(self, supabase_client: Client) -> List[Aircraft]:
-        """Fetch all aircraft the current user has access to."""
-        response = supabase_client.table("aircraft").select("*").execute()
+    async def list_aircraft(self, request: Request, supabase_client: Client) -> List[Aircraft]:
+        """Fetch all aircraft belonging to the authenticated user."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("aircraft").select("*").eq("user_id", user_id).execute()
         return [Aircraft(**data) for data in response.data]
 
     @get("/{aircraft_id:uuid}")
-    async def get_aircraft(self, supabase_client: Client, aircraft_id: UUID) -> Aircraft:
-        """Fetch a specific aircraft by ID."""
-        response = supabase_client.table("aircraft").select("*").eq("id", str(aircraft_id)).execute()
+    async def get_aircraft(self, request: Request, supabase_client: Client, aircraft_id: UUID) -> Aircraft:
+        """Fetch a specific aircraft by ID, scoped to the authenticated user."""
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("aircraft").select("*").eq("id", str(aircraft_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Aircraft with ID {aircraft_id} not found")
         return Aircraft(**response.data[0])
@@ -35,17 +37,19 @@ class AircraftController(Controller):
         return Aircraft(**response.data[0])
 
     @patch("/{aircraft_id:uuid}")
-    async def update_aircraft(self, supabase_client: Client, aircraft_id: UUID, data: AircraftUpdate) -> Aircraft:
+    async def update_aircraft(self, request: Request, supabase_client: Client, aircraft_id: UUID, data: AircraftUpdate) -> Aircraft:
         """Update a specific aircraft."""
+        user_id = str(request.state.user.id)
         update_data = data.model_dump(exclude_unset=True)
-        response = supabase_client.table("aircraft").update(update_data).eq("id", str(aircraft_id)).execute()
+        response = supabase_client.table("aircraft").update(update_data).eq("id", str(aircraft_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Aircraft with ID {aircraft_id} not found or permission denied")
         return Aircraft(**response.data[0])
 
     @delete("/{aircraft_id:uuid}")
-    async def delete_aircraft(self, supabase_client: Client, aircraft_id: UUID) -> None:
+    async def delete_aircraft(self, request: Request, supabase_client: Client, aircraft_id: UUID) -> None:
         """Delete a specific aircraft."""
-        response = supabase_client.table("aircraft").delete().eq("id", str(aircraft_id)).execute()
+        user_id = str(request.state.user.id)
+        response = supabase_client.table("aircraft").delete().eq("id", str(aircraft_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Aircraft with ID {aircraft_id} not found or permission denied")
