@@ -54,7 +54,7 @@ class FlightHelperController(Controller):
             }
             supabase_client.table("flight_sessions").insert(start_data).execute()
 
-            message = f"Flight started at {now_utc.strftime("%H:%M")} UTC"
+            message = f"Flight started at {now_utc.strftime('%H:%M')} UTC"
             if format == "text":
                 return Response(content=message, media_type=MediaType.TEXT)
             return FlightSessionResponse(
@@ -79,8 +79,8 @@ class FlightHelperController(Controller):
 
             message = (
                 f"Flight finished!\n"
-                f"Start: {start_time.strftime("%H:%M")} UTC\n"
-                f"End: {now_utc.strftime("%H:%M")} UTC\n"
+                f"Start: {start_time.strftime('%H:%M')} UTC\n"
+                f"End: {now_utc.strftime('%H:%M')} UTC\n"
                 f"Duration: {flight_time_str}"
             )
             
@@ -108,27 +108,48 @@ class FlightHelperController(Controller):
 
     @post("/session/shortcut", guards=[])
     async def toggle_session_shortcut(self, request: Request) -> Any:
-        """iOS Shortcut endpoint to toggle starting/stopping a flight session."""
+        """iOS Shortcut / WhatsApp bot endpoint to start or stop a flight session.
+
+        Accepts an optional "timestamp" (ISO-8601) to backdate the start/end time instead
+        of using the request's arrival time, and an optional "action" ("start"/"end") so
+        callers who already know their intent get a clear error instead of silently
+        toggling the wrong way if the session state isn't what they expect.
+        """
         api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
         if not api_key:
             raise ValidationException("API Key (X-API-Key header or api_key query param) is required.")
 
         service_client = SupabaseManager.get_service_client()
-        
+
         profile_resp = service_client.table("profiles").select("id").eq("api_key", api_key).execute()
         if not profile_resp.data:
             raise ValidationException("Invalid API Key.")
-        
+
         user_id = profile_resp.data[0]["id"]
-        now_utc = datetime.now(timezone.utc)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        action = (body.get("action") or request.query_params.get("action") or "").strip().lower() or None
+
+        timestamp_input = body.get("timestamp") or request.query_params.get("timestamp")
+        if timestamp_input:
+            try:
+                event_time = datetime.fromisoformat(str(timestamp_input).replace("Z", "+00:00"))
+            except ValueError:
+                raise ValidationException("timestamp must be a valid ISO-8601 datetime.")
+            if event_time.tzinfo is None:
+                event_time = event_time.replace(tzinfo=timezone.utc)
+        else:
+            event_time = datetime.now(timezone.utc)
 
         session_query = service_client.table("flight_sessions").select("*").eq("user_id", user_id).execute()
 
         if not session_query.data:
-            try:
-                body = await request.json()
-            except Exception:
-                body = {}
+            if action == "end":
+                raise ValidationException("No tenés ningún vuelo en curso para finalizar.")
 
             aircraft_input = body.get("aircraft") or request.query_params.get("aircraft")
             if not aircraft_input:
@@ -160,34 +181,41 @@ class FlightHelperController(Controller):
             start_data = {
                 "user_id": user_id,
                 "aircraft_id": aircraft_id,
-                "start_time": now_utc.isoformat(),
+                "start_time": event_time.isoformat(),
                 "route": route,
                 "landings": landings
             }
             service_client.table("flight_sessions").insert(start_data).execute()
 
+            start_str = event_time.strftime('%H:%M')
             return {
                 "active": True,
-                "message": f"Vuelo INICIADO con éxito en la aeronave {reg}.",
+                "message": f"Vuelo INICIADO con éxito en la aeronave {reg} a las {start_str} UTC.",
                 "aircraft": reg,
-                "start_time": now_utc.isoformat()
+                "start_time": event_time.isoformat()
             }
         else:
+            if action == "start":
+                raise ValidationException("Ya tenés un vuelo en curso. Finalizalo antes de iniciar uno nuevo.")
+
             session = session_query.data[0]
             start_time = datetime.fromisoformat(session["start_time"].replace("Z", "+00:00"))
-            
-            duration_delta = now_utc - start_time
+
+            if event_time < start_time:
+                raise ValidationException("La hora de finalización no puede ser anterior a la hora de inicio del vuelo.")
+
+            duration_delta = event_time - start_time
             total_minutes = duration_delta.total_seconds() / 60
             hours_decimal = total_minutes // 60 + self.format_flight_hours(total_minutes % 60)
-            
+
             service_client.table("flight_sessions").delete().eq("user_id", user_id).execute()
 
             acft_resp = service_client.table("aircraft").select("registration").eq("id", session["aircraft_id"]).execute()
             reg = acft_resp.data[0]["registration"] if acft_resp.data else "Avión"
 
-            takeoff_str = start_time.strftime("%H:%M")
-            landing_str = now_utc.strftime("%H:%M")
-            date_str = start_time.strftime("%Y-%m-%d")
+            takeoff_str = start_time.strftime('%H:%M')
+            landing_str = event_time.strftime('%H:%M')
+            date_str = start_time.strftime('%Y-%m-%d')
             
             base_url = "https://vector.fdiaznem.com.ar"
             link = (
