@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     supabase_anon_key: str = Field(validation_alias="SUPABASE_PUBLISHABLE_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, validation_alias="SUPABASE_SERVICE_ROLE_KEY")
     
+    # Shared secret for the document expiry sweep. Declared explicitly (rather
+    # than read off the environment ad hoc) because the endpoint it guards runs
+    # under the service role across every user, so it must fail closed when the
+    # variable is missing instead of silently falling back to a default.
+    documents_alert_secret: Optional[str] = Field(default=None, validation_alias="DOCUMENTS_ALERT_SECRET")
+
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
     google_client_secret: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")

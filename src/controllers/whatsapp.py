@@ -80,6 +80,15 @@ class WhatsAppController(Controller):
         except Exception as e:
             print(f"WhatsApp dashboard transactions error: {str(e)}")
 
+        # 6. Documents, so the copilot can answer "¿cuándo vence mi CMA?" without
+        # the expiry having to live on the profile.
+        documents_data = []
+        try:
+            documents_resp = service_client.table("documents").select("*").eq("user_id", user_id).order("expiry_date").execute()
+            documents_data = documents_resp.data or []
+        except Exception as e:
+            print(f"WhatsApp dashboard documents error: {str(e)}")
+
         return {
             "profile": profile,
             "aircraft": aircraft,
@@ -87,7 +96,8 @@ class WhatsAppController(Controller):
             "session": {"active": bool(session_data), "session": session_data},
             "packs": packs_data,
             "transactions": transactions_data,
-            "balance": balance
+            "balance": balance,
+            "documents": documents_data
         }
 
     @get("/chat-history")

@@ -31,13 +31,21 @@ The database is strictly locked down. This API implements a **User-Scoped Client
 ```text
 src/
 ├── auth/            # Security guards and JWT handling
-├── controllers/     # API route logic (Aircraft, Flights, Auth, Profiles)
+├── controllers/     # API route logic (Aircraft, Flights, Auth, Profiles, Audit, Documents)
 ├── models/          # Pydantic data schemas
+├── services/        # Pure domain logic with no I/O (audit rules, alert scheduling)
 ├── config.py        # Settings & Environment management
 └── supabase_client.py # Supabase client factory (Singleton & Scoped)
 run.py               # Application entry point
 requirements.txt      # Project dependencies
 ```
+
+### Why `services/`
+
+The audit rules and the expiry-alert scheduling take plain dicts and return
+plain results — no Supabase, no request context. Keeping them out of the
+controllers is what makes `test_audit_engine.py` runnable with no database and
+no server.
 
 ---
 
@@ -102,4 +110,35 @@ python test_registration.py
 | **Aircraft**| `/api/aircraft` | GET/POST | List/Add aircraft |
 | **Aircraft**| `/api/aircraft/{id}` | PATCH/DELETE| Update/Remove aircraft |
 | **Flights** | `/api/flights` | GET/POST | List/Log flights |
+| **Audit** | `/api/audit/summary` | GET | Finding counts for the badge and dashboard card |
+| **Audit** | `/api/audit/findings` | GET | Findings, filterable by severity/rule |
+| **Audit** | `/api/audit/findings/{id}/suppress` | POST | Silence (or restore) a finding |
+| **Audit** | `/api/audit/recalculate` | POST | Re-run every rule over the logbook |
+| **Documents**| `/api/documents` | GET/POST | List/Add documents with expiry dates |
+| **Documents**| `/api/documents/{id}` | PATCH/DELETE| Update/Remove a document |
+| **Alerts** | `/api/document-alerts/pending` | GET | Alerts due today (shared secret, all users) |
+| **Alerts** | `/api/document-alerts/{id}/sent` | POST | Record a delivered alert (shared secret) |
 | **System** | `/api/health` | GET | API & DB status |
+
+### Audit engine
+
+Findings are recomputed automatically whenever a flight is created, edited or
+deleted, and stored in `audit_findings`. Four rules run: overlapping flights,
+aircraft missing from the hangar, duplicates, and PIC/SIC breakdowns that don't
+match the flight time. A finding the pilot suppresses keeps being refreshed but
+stops counting — recalculation never clears that flag.
+
+Run the rule checks with no database:
+
+```bash
+python test_audit_engine.py
+```
+
+### Document expiry alerts
+
+`/api/document-alerts/*` runs across every user under the service role, so it
+authenticates with `DOCUMENTS_ALERT_SECRET` instead of a session and **refuses to
+run when that variable is unset**. The backend only decides what is due and
+records what was delivered; the WhatsApp send itself happens in the Next app
+(`/api/cron/document-alerts`), which is where the Kapso credentials live. Add
+the same secret to both `.env` files and schedule the frontend route daily.

@@ -49,6 +49,31 @@ class DashboardController(Controller):
         except Exception as e:
             print(f"Consolidated dashboard transactions error: {str(e)}")
 
+        # 7. Audit counters and documents. Folded into this endpoint rather than
+        # fetched separately because the dashboard renders both the "Salud del
+        # logbook" card and the expiry widget on first paint, and the nav badge
+        # needs the audit count on every page anyway.
+        audit_summary = {"critical": 0, "warning": 0, "suppressed": 0, "open_total": 0}
+        try:
+            findings_resp = supabase_client.table("audit_findings").select("severity, suppressed").eq("user_id", user_id).execute()
+            for row in findings_resp.data or []:
+                if row.get("suppressed"):
+                    audit_summary["suppressed"] += 1
+                elif row.get("severity") == "critical":
+                    audit_summary["critical"] += 1
+                else:
+                    audit_summary["warning"] += 1
+            audit_summary["open_total"] = audit_summary["critical"] + audit_summary["warning"]
+        except Exception as e:
+            print(f"Consolidated dashboard audit error: {str(e)}")
+
+        documents_data = []
+        try:
+            documents_resp = supabase_client.table("documents").select("*").eq("user_id", user_id).order("expiry_date").execute()
+            documents_data = documents_resp.data or []
+        except Exception as e:
+            print(f"Consolidated dashboard documents error: {str(e)}")
+
         return {
             "profile": profile,
             "aircraft": aircraft,
@@ -56,5 +81,7 @@ class DashboardController(Controller):
             "session": {"active": bool(session_data), "session": session_data},
             "packs": packs_data,
             "transactions": transactions_data,
-            "balance": balance
+            "balance": balance,
+            "audit": audit_summary,
+            "documents": documents_data
         }

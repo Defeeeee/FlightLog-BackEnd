@@ -5,10 +5,26 @@ from typing import List, Optional
 from uuid import UUID
 from src.models.flight import Flight, FlightCreate, FlightUpdate
 from src.auth.guards import auth_guard
+from src.services import audit_engine
 
 class FlightsController(Controller):
     path = "/flights"
     guards = [auth_guard]
+
+    @staticmethod
+    def _refresh_audit(user_id: str, supabase_client: Client) -> None:
+        """
+        Recomputes the audit findings after the logbook changes.
+
+        Never allowed to fail the write that triggered it: the flight is already
+        saved by this point, and losing a log entry because a derived report
+        couldn't be refreshed would be a bad trade. A failed run just leaves
+        stale findings until the next flight or a manual recalculation.
+        """
+        try:
+            audit_engine.recalculate_for_user(supabase_client, user_id)
+        except Exception as exc:
+            print(f"Audit recalculation failed for user {user_id}: {str(exc)}")
 
     async def _sync_flight_transaction(
         self,
@@ -109,6 +125,8 @@ class FlightsController(Controller):
             supabase_client=supabase_client
         )
 
+        self._refresh_audit(str(flight_obj.user_id), supabase_client)
+
         return flight_obj
 
     @patch("/{flight_id:uuid}")
@@ -134,6 +152,8 @@ class FlightsController(Controller):
             supabase_client=supabase_client
         )
 
+        self._refresh_audit(str(flight_obj.user_id), supabase_client)
+
         return flight_obj
 
     @delete("/{flight_id:uuid}")
@@ -143,3 +163,7 @@ class FlightsController(Controller):
         response = supabase_client.table("flights").delete().eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")
+
+        # Deleting a flight can clear findings on *other* flights too — the
+        # counterpart of an overlap, or the survivor of a duplicate pair.
+        self._refresh_audit(user_id, supabase_client)
