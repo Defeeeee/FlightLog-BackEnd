@@ -36,6 +36,8 @@ class Flight(BaseModel):
     discount_type: Optional[str] = None
     discount_amount: Optional[float] = None
     purpose: str = "VP"
+    #: Free-text note, as the paper ANAC logbook's observations column.
+    remarks: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -71,6 +73,7 @@ class FlightCreate(BaseModel):
     discount_type: Optional[str] = None
     discount_amount: Optional[float] = None
     purpose: str = "VP"
+    remarks: Optional[str] = None
     
     model_config = ConfigDict(populate_by_name=True)
 
