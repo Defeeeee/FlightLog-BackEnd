@@ -12,6 +12,33 @@ class FlightsController(Controller):
     guards = [auth_guard]
 
     @staticmethod
+    def _default_logbook_id(user_id: str, supabase_client: Client) -> str:
+        """
+        The pilot's default logbook, creating one if they have none.
+
+        Self-healing on purpose: a user who signed up after the logbooks
+        migration has no row from the backfill, and their first flight would
+        otherwise have nowhere to go.
+        """
+        existing = (
+            supabase_client.table("logbooks")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("is_default", True)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return existing.data[0]["id"]
+
+        created = (
+            supabase_client.table("logbooks")
+            .insert({"user_id": user_id, "name": "Mi libro", "is_default": True})
+            .execute()
+        )
+        return created.data[0]["id"]
+
+    @staticmethod
     def _refresh_audit(user_id: str, supabase_client: Client) -> None:
         """
         Recomputes the audit findings after the logbook changes.
@@ -109,8 +136,16 @@ class FlightsController(Controller):
         # Use mode="json" to serialize UUIDs, dates, etc., to strings
         # and by_alias=True to use the database column names (with spaces)
         insert_data = data.model_dump(by_alias=True, mode="json")
-        insert_data["user_id"] = str(request.state.user.id)
-        
+        user_id = str(request.state.user.id)
+        insert_data["user_id"] = user_id
+
+        # A flight always lands in a logbook. When the client does not name one
+        # — the WhatsApp bot, or any build that predates logbooks — it goes to
+        # the pilot's default. Without this fallback `logbook_id` could never
+        # become NOT NULL, and a flight with no logbook is invisible in the app.
+        if not insert_data.get("logbook_id"):
+            insert_data["logbook_id"] = self._default_logbook_id(user_id, supabase_client)
+
         response = supabase_client.table("flights").insert(insert_data).execute()
         flight_obj = Flight(**response.data[0])
 

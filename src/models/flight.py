@@ -6,6 +6,7 @@ from uuid import UUID
 class Flight(BaseModel):
     id: UUID
     user_id: UUID
+    logbook_id: Optional[UUID] = None
     aircraft_id: Optional[UUID] = None
     date: date
     route: str
@@ -39,6 +40,10 @@ class Flight(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 class FlightCreate(BaseModel):
+    #: Optional: when omitted the backend files the flight in the pilot's
+    #: default logbook, so a client that knows nothing about logbooks keeps
+    #: working unchanged.
+    logbook_id: Optional[UUID] = None
     aircraft_id: Optional[UUID] = None
     date: date
     route: str
