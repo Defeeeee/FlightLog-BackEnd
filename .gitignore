@@ -30,3 +30,5 @@ wheels/
 
 # Supabase / Local keys (just in case)
 .env
+.venv/
+.DS_Store

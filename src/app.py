@@ -12,6 +12,7 @@ from src.controllers.flights import FlightsController
 from src.controllers.auth import AuthController
 from src.controllers.flight_helper import FlightHelperController
 from src.controllers.flight_packs import FlightPacksController
+from src.controllers.logbooks import LogbooksController
 from src.controllers.dashboard import DashboardController
 from src.controllers.transactions import TransactionsController
 from src.controllers.whatsapp import WhatsAppController
@@ -63,6 +64,7 @@ api_router = Router(
         FlightsController,
         FlightHelperController,
         FlightPacksController,
+        LogbooksController,
         DashboardController,
         TransactionsController,
         WhatsAppController,
