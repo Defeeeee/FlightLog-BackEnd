@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # under the service role across every user, so it must fail closed when the
     # variable is missing instead of silently falling back to a default.
     documents_alert_secret: Optional[str] = Field(default=None, validation_alias="DOCUMENTS_ALERT_SECRET")
+    whatsapp_webhook_secret: Optional[str] = Field(default=None, validation_alias="WHATSAPP_WEBHOOK_SECRET")
 
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")

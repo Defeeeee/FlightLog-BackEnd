@@ -13,7 +13,7 @@ class WhatsAppController(Controller):
     path = "/whatsapp"
 
     def _verify_secret(self, secret: str) -> None:
-        expected = getattr(settings, "whatsapp_webhook_secret", None) or "shared-vector-secret-2026"
+        expected = settings.whatsapp_webhook_secret or "shared-vector-secret-2026"
         if secret != expected and secret != settings.supabase_anon_key:
             raise NotAuthorizedException("Invalid secret token.")
 
