@@ -77,6 +77,6 @@ exactamente y qué es lo próximo.
 
 **Por qué:** Se alinea el backend con la política obligatoria de documentación y trazabilidad de agentes definida en `AGENTS.md`. Se documenta la implementación de la feature de múltiples libros de vuelo aprobada en el plan post-flightdeck.
 
-**Estado:** Terminado.
+**Estado:** Terminado. PR creada en https://github.com/Defeeeee/FlightLog-BackEnd/pull/4
 
-**Verificación:** `python test_audit_engine.py` pasa correctamente. `git status` limpio.
+**Verificación:** `python test_audit_engine.py` pasa correctamente. `git status` limpio. Rama `feat/logbooks` pusheada a origin.
