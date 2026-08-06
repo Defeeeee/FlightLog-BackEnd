@@ -25,6 +25,9 @@ jobs:
       # Que la app se pueda importar. Atrapa imports rotos, decoradores mal
       # puestos y modelos que no validan — sin levantar el server.
       - name: Importar la app
+        env:
+          SUPABASE_URL: "https://dummy.supabase.co"
+          SUPABASE_PUBLISHABLE_KEY: "dummy-key"
         run: python -c "import src.app"
 
       # Corre offline: las reglas toman diccionarios y devuelven hallazgos, sin
