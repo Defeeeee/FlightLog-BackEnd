@@ -93,7 +93,17 @@ class WhatsAppController(Controller):
         except Exception as e:
             print(f"WhatsApp dashboard transactions error: {str(e)}")
 
-        # 6. Documents, so the copilot can answer "¿cuándo vence mi CMA?" without
+        # 6. Logbooks, so the copilot can put a flight in the book the pilot names
+        # instead of always defaulting. Without this the WhatsApp path is the only
+        # way into the app that cannot choose a logbook.
+        logbooks_data = []
+        try:
+            logbooks_resp = service_client.table("logbooks").select("*").eq("user_id", user_id).order("created_at").execute()
+            logbooks_data = logbooks_resp.data or []
+        except Exception as e:
+            print(f"WhatsApp dashboard logbooks error: {str(e)}")
+
+        # 7. Documents, so the copilot can answer "¿cuándo vence mi CMA?" without
         # the expiry having to live on the profile.
         documents_data = []
         try:
@@ -110,7 +120,8 @@ class WhatsAppController(Controller):
             "packs": packs_data,
             "transactions": transactions_data,
             "balance": balance,
-            "documents": documents_data
+            "documents": documents_data,
+            "logbooks": logbooks_data
         }
 
     @get("/chat-history")
