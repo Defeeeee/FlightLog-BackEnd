@@ -1,5 +1,5 @@
 from hmac import compare_digest
-from litestar import Controller, get, post
+from litestar import Controller, Request, get, post
 from litestar.exceptions import NotFoundException, NotAuthorizedException
 from typing import Dict, Any
 from datetime import datetime, timezone
@@ -11,6 +11,35 @@ from src.config import settings
 
 class WhatsAppController(Controller):
     path = "/whatsapp"
+
+    # H1.1, paso 1 de 3. El secreto pasa de la query string a un header porque
+    # en la URL queda escrito en texto plano en los logs de nginx y de PM2, en
+    # cada mensaje que recibe el bot, junto al teléfono del piloto.
+    #
+    # Esta versión acepta **las dos formas** a propósito. Cambiar los dos repos a
+    # la vez corta el bot durante la ventana en que uno está desplegado y el otro
+    # no — es exactamente lo que pasó el 2026-08-06 con el valor del secreto y
+    # costó una hora y media. La secuencia es:
+    #
+    #   1. (esto) el backend acepta header y query.
+    #   2. el frontend pasa a mandar el header.
+    #   3. el backend deja de aceptar la query.
+    #
+    # El paso 3 va después de confirmar en los logs que no queda ninguna llamada
+    # con `secret=` en la URL.
+    # El teléfono se mueve por la misma razón y en la misma tanda. Sacar los
+    # `print` no alcanzaba: **el access log de uvicorn registra la URL entera**,
+    # así que mientras el número viaje en la query string queda escrito en disco
+    # en cada request igual. Comprobado el 2026-08-06 — el número completo seguía
+    # apareciendo dos veces en el log después de limpiar los prints.
+    SECRET_HEADER = "x-vector-secret"
+    PHONE_HEADER = "x-vector-phone"
+
+    def _secret_from(self, request: Request, secret: str | None) -> str:
+        return request.headers.get(self.SECRET_HEADER) or (secret or "")
+
+    def _phone_from(self, request: Request, phone: str | None) -> str:
+        return request.headers.get(self.PHONE_HEADER) or (phone or "")
 
     def _verify_secret(self, secret: str) -> None:
         """Guard for the WhatsApp endpoints, which read user data with the service
@@ -30,16 +59,14 @@ class WhatsAppController(Controller):
             raise NotAuthorizedException("Invalid secret token.")
 
     @get("/user-data")
-    async def get_user_data_by_phone(self, phone: str, secret: str) -> Dict[str, Any]:
+    async def get_user_data_by_phone(self, request: Request, phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
         """Fetch dashboard context for a user by their WhatsApp phone number."""
-        self._verify_secret(secret)
+        self._verify_secret(self._secret_from(request, secret))
 
         service_client = SupabaseManager.get_service_client()
         
         # Normalize phone (digits only)
-        clean_phone = "".join(c for c in phone if c.isdigit())
-        print(f"[DEBUG WHATSAPP] Fetching user data for phone: {phone} (clean: {clean_phone})")
-        print(f"[DEBUG WHATSAPP] Service role key configured: {bool(settings.supabase_service_role_key)}")
+        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
         if not clean_phone:
             raise NotFoundException("Número de teléfono inválido")
 
@@ -55,7 +82,11 @@ class WhatsAppController(Controller):
                 profile_resp = service_client.table("profiles").select("*").eq("whatsapp_phone", alt_phone).execute()
 
         if not profile_resp.data:
-            print(f"[DEBUG WHATSAPP] Profile query returned no data for phone: {clean_phone}")
+            # Sin el número: que hubo una consulta que no resolvió es útil para
+            # diagnosticar, de qué teléfono era no le hace falta a nadie y queda
+            # escrito en el disco del server. El sufijo alcanza para correlacionar
+            # con lo que reporte el piloto sin guardar el número entero.
+            print(f"[whatsapp] consulta sin perfil para un número terminado en …{clean_phone[-4:]}")
             raise NotFoundException("Usuario no registrado con ese número de WhatsApp")
 
         profile = profile_resp.data[0]
@@ -124,12 +155,12 @@ class WhatsAppController(Controller):
         }
 
     @get("/chat-history")
-    async def get_chat_history(self, phone: str, secret: str) -> Dict[str, Any]:
+    async def get_chat_history(self, request: Request, phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
         """Fetch chat history for a WhatsApp phone number."""
-        self._verify_secret(secret)
+        self._verify_secret(self._secret_from(request, secret))
         
         service_client = SupabaseManager.get_service_client()
-        clean_phone = "".join(c for c in phone if c.isdigit())
+        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
         
         resp = service_client.table("whatsapp_chats").select("history").eq("phone", clean_phone).execute()
         if not resp.data:
@@ -137,12 +168,12 @@ class WhatsAppController(Controller):
         return {"history": resp.data[0]["history"]}
 
     @post("/chat-history")
-    async def update_chat_history(self, phone: str, secret: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_chat_history(self, request: Request, data: Dict[str, Any], phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
         """Update chat history for a WhatsApp phone number."""
-        self._verify_secret(secret)
+        self._verify_secret(self._secret_from(request, secret))
         
         service_client = SupabaseManager.get_service_client()
-        clean_phone = "".join(c for c in phone if c.isdigit())
+        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
         history = data.get("history", [])
         
         # Limit history to last 20 messages to keep context efficient
