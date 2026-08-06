@@ -1,7 +1,6 @@
 from hmac import compare_digest
 from litestar import Controller, get, post
 from litestar.exceptions import NotFoundException, NotAuthorizedException
-from supabase import Client
 from typing import Dict, Any
 from datetime import datetime, timezone
 from src.supabase_client import SupabaseManager

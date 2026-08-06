@@ -1,9 +1,7 @@
 from typing import Optional
 from litestar import Request
-from litestar.exceptions import NotAuthorizedException
-from supabase import Client, create_client
+from supabase import Client
 from src.supabase_client import SupabaseManager
-from src.config import settings
 
 class AuthHandler:
     """Handles authentication and provides user-scoped Supabase clients."""

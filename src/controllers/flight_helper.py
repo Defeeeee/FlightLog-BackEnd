@@ -1,5 +1,5 @@
 from litestar import Controller, post, get, Request, Response, MediaType
-from litestar.exceptions import NotFoundException, ValidationException
+from litestar.exceptions import ValidationException
 from supabase import Client
 from datetime import datetime, timezone
 from typing import Optional, Any

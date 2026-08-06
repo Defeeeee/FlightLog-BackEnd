@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Que la app se pueda importar. Atrapa imports rotos, decoradores mal
+      # puestos y modelos que no validan — sin levantar el server.
+      - name: Importar la app
+        run: python -c "import src.app"
+
+      # Corre offline: las reglas toman diccionarios y devuelven hallazgos, sin
+      # base ni server. Sale con código 1 si algún check falla.
+      - name: Motor de auditoría
+        run: python test_audit_engine.py
+
+      # OJO: `test_registration.py` NO se corre acá y no debería. Pega contra un
+      # server en localhost:8000 y **crea un usuario de verdad** en Supabase.
+      # Es un script manual, no un test.
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check src/ --output-format=github
+
+  secretos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Este repo tuvo un secreto compartido hardcodeado durante meses, público.
+      - name: Buscar secretos
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

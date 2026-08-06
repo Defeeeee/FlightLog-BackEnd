@@ -3,7 +3,6 @@ from litestar.exceptions import NotFoundException
 from supabase import Client
 from typing import List
 from uuid import UUID
-from datetime import datetime
 from src.models.flight_pack import FlightPack, FlightPackCreate, FlightPackUpdate
 from src.auth.guards import auth_guard
 

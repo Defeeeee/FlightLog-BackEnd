@@ -1,6 +1,6 @@
 import hmac
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post, Request
