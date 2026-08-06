@@ -28,7 +28,6 @@ class ProfilesController(Controller):
                         "first_name": user.user_metadata.get("first_name") or user.user_metadata.get("full_name", "Comandante").split(" ")[0],
                         "last_name": user.user_metadata.get("last_name") or " ".join(user.user_metadata.get("full_name", "").split(" ")[1:]),
                         "license_type": "-",
-                        "cma_expiry": "2100-12-31" # Default far future date to signal it needs change
                     }
                     # Insert the new profile
                     supabase_client.table("profiles").insert(new_profile).execute()
@@ -53,10 +52,6 @@ class ProfilesController(Controller):
         """Update a specific profile. Users may only update their own profile."""
         user_id = str(request.state.user.id)
         update_data = data.model_dump(exclude_unset=True)
-        # Dates need to be converted to ISO format strings for Supabase JSON serialization
-        if "cma_expiry" in update_data and update_data["cma_expiry"]:
-            update_data["cma_expiry"] = update_data["cma_expiry"].isoformat()
-
         response = supabase_client.table("profiles").update(update_data).eq("id", str(profile_id)).eq("id", user_id).execute()
         if not response.data:
             raise NotFoundException(f"Profile with ID {profile_id} not found or you don't have permission to update it")
