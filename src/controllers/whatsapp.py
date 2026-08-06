@@ -1,3 +1,4 @@
+from hmac import compare_digest
 from litestar import Controller, get, post
 from litestar.exceptions import NotFoundException, NotAuthorizedException
 from supabase import Client
@@ -13,8 +14,20 @@ class WhatsAppController(Controller):
     path = "/whatsapp"
 
     def _verify_secret(self, secret: str) -> None:
-        expected = settings.whatsapp_webhook_secret or "shared-vector-secret-2026"
-        if secret != expected and secret != settings.supabase_anon_key:
+        """Guard for the WhatsApp endpoints, which read user data with the service
+        role and therefore bypass RLS entirely.
+
+        Fails closed when the secret is not configured. It used to fall back to a
+        constant that lives in a public repository, and to also accept the Supabase
+        anon key — which ships to every browser. Between the two, anyone with a
+        pilot's phone number could read their whole logbook.
+
+        `compare_digest` because this is a shared secret compared on every request.
+        """
+        expected = settings.whatsapp_webhook_secret
+        if not expected:
+            raise NotAuthorizedException("WhatsApp integration is not configured.")
+        if not secret or not compare_digest(secret, expected):
             raise NotAuthorizedException("Invalid secret token.")
 
     @get("/user-data")
