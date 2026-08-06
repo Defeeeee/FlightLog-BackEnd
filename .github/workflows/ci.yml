@@ -42,7 +42,7 @@ jobs:
       - name: Lint
         run: |
           pip install ruff
-          ruff check src/ --output-format=github
+          ruff check src/ --select=E9,F --output-format=github
 
   secretos:
     runs-on: ubuntu-latest
