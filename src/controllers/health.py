@@ -1,4 +1,4 @@
-from litestar import Controller, get, MediaType, status_codes
+from litestar import Controller, get, MediaType
 from litestar.exceptions import InternalServerException
 from supabase import Client
 from typing import Dict

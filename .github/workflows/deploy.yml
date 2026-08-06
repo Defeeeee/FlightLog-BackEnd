@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Nunca dos deploys pisándose. Sin `cancel-in-progress`: un deploy a medias es
+# peor que uno encolado.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar por SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/FlightLog-BackEnd
+
+            # Para volver si el health check falla.
+            ANTERIOR=$(git rev-parse HEAD)
+            git fetch origin main
+            git reset --hard origin/main
+
+            # SERVER_SETUP.md dice ./venv y en otras máquinas es .venv. Se
+            # detecta en vez de asumirse: un deploy que instala con el intérprete
+            # equivocado falla mucho más tarde y peor.
+            if   [ -x venv/bin/pip ];  then PIP=venv/bin/pip
+            elif [ -x .venv/bin/pip ]; then PIP=.venv/bin/pip
+            else echo "No encuentro el virtualenv"; exit 1
+            fi
+            $PIP install -q -r requirements.txt
+
+            # --update-env o el proceso se queda con el entorno viejo. Esto ya
+            # tiró la auditoría abajo una vez y costó una hora encontrarlo.
+            pm2 restart flightlog-7477 --update-env
+
+            # Health check con reintentos: uvicorn tarda unos segundos.
+            for i in $(seq 1 15); do
+              if curl -fsS http://localhost:7477/api/health > /dev/null; then
+                echo "Health OK tras ${i}s"
+                exit 0
+              fi
+              sleep 1
+            done
+
+            echo "El health check falló. Volviendo a $ANTERIOR"
+            git reset --hard "$ANTERIOR"
+            $PIP install -q -r requirements.txt
+            pm2 restart flightlog-7477 --update-env
+            exit 1

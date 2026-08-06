@@ -1,7 +1,7 @@
 from litestar import Controller, get, post, delete, Request
 from litestar.exceptions import ValidationException, NotFoundException, PermissionDeniedException
 from supabase import Client
-from typing import List, Dict, Any
+from typing import List
 from uuid import UUID
 from src.models.transaction import Transaction, TransactionCreate
 from src.auth.guards import auth_guard
