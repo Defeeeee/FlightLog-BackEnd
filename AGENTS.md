@@ -80,3 +80,76 @@ exactamente y qué es lo próximo.
 **Estado:** Terminado. PR creada en https://github.com/Defeeeee/FlightLog-BackEnd/pull/4
 
 **Verificación:** `python test_audit_engine.py` pasa correctamente. `git status` limpio. Rama `feat/logbooks` pusheada a origin.
+
+### 2026-08-10 21:45 UTC — Claude (Opus 5, vía Claude Code) — Cada login envenenaba el proceso entero
+
+**Quién:** Claude Opus 5 corriendo en Claude Code, para Federico Díaz Nemeth.
+
+**Qué cambié:**
+- `src/supabase_client.py` — `get_base_client()` deja de cachear el cliente y devuelve uno nuevo por llamada. Se agrega `verify_access_token()`, que valida un JWT con un GET a GoTrue sin cliente de por medio.
+- `src/auth/guards.py` — el guard verifica con esa función en vez de `auth.get_user()` sobre el cliente compartido.
+- `requirements.txt` — `supabase` pineado en `2.28.3`.
+
+**Por qué:** `/health` devolvía `PGRST303 "JWT expired"` y **un `pm2 restart` lo
+arreglaba**. Ese detalle descarta la explicación que se venía usando desde el
+2026-08-04: si la clave del `.env` estuviera vencida, reiniciar no cambiaría nada.
+
+Ninguna clave del proyecto puede vencer — `service_role` y `anon` legacy van hasta
+2036-03-31, y la publicable es del tipo nuevo sin `exp`. El JWT vencido sólo podía
+ser el access token de un usuario.
+
+Un cliente de `supabase-py` **no es un objeto sin estado**. En la 2.28.3:
+
+```python
+def _listen_to_auth_events(self, event, session):
+    if event in ["SIGNED_IN", "TOKEN_REFRESHED", "SIGNED_OUT"]:
+        self._postgrest = None
+        access_token = session.access_token if session else self.supabase_key
+    self.options.headers["Authorization"] = auth_header
+```
+
+`POST /auth/login` no lleva bearer token, así que `provide_supabase_client`
+(`security.py:31`) le entregaba **el singleton anónimo** —el mismo que sirve
+`/health`— y `AuthController.login` le hacía `sign_in_with_password` encima. Cada
+login dejaba al proceso firmando con el token de esa persona; una hora después,
+toda consulta anónima fallaba hasta el próximo restart. Con un solo piloto usando
+la app, el síntoma parecía aleatorio.
+
+Esto cierra la asimetría del 2026-08-04: el dashboard andaba porque vivía del
+`TOKEN_CACHE` de 10 s y Reanalizar fallaba porque caía fuera y tocaba el cliente
+contaminado. Se atribuyó a la clave y se rotó; **lo que lo arregló fue el reinicio
+que traía el deploy.**
+
+> **Un restart que "arregla" algo es información, no una solución.** Si reiniciar
+> lo cura, el problema está en memoria y va a volver. Es lo que separó seis días
+> de diagnóstico equivocado de la causa real.
+
+**Dos cosas que no hay que revertir:**
+
+- **No volver a cachear `get_base_client()`.** Mientras cualquier consumidor pueda
+  iniciar sesión sobre el cliente que recibe, compartirlo es compartir esa sesión.
+  El `create_client` por request sólo se paga en rutas sin sesión.
+- **No despinear `supabase`.** Estaba en `>=2.0.0`, con 60 versiones posibles y
+  comportamiento de auth distinto entre ellas. El análisis de arriba vale para
+  2.28.3.
+
+Descartado con evidencia, para que no se vuelva a levantar: compartir una única
+instancia de `ClientOptions` **es seguro** en 2.28.3, porque el cliente hace
+`copy.copy(options)` y se arma su propio dict de headers.
+
+**Estado:** Terminado y desplegado. Falta la comprobación de que el bug murió, que
+requiere esperar (ver abajo).
+
+**Verificación:** Contra el SDK que reemplaza — mismo endpoint `/auth/v1/user`,
+mismas cabeceras, y `parse_user_response` parsea el body como usuario, o sea que
+`id` va en la raíz. En vivo contra el GoTrue del proyecto: token basura, vacío y
+JWT mal firmado devuelven `None`, que el guard traduce al mismo 401 de antes.
+
+El camino de éxito no se pudo ejercitar desde el contenedor por falta de sesión; lo
+cubre el smoke autenticado del frontend, que entra con cuenta real y pega a diez
+rutas del dashboard, todas por este guard.
+
+> **La prueba que de verdad cierra el caso:** loguearse, **esperar más de una hora
+> sin reiniciar**, y pegarle a `/health`. Antes de este cambio eso devolvía 500. Es
+> la única que distingue "arreglado" de "recién reiniciado", y es exactamente la
+> que faltó el 2026-08-04.
