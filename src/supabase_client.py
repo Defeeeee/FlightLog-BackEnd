@@ -51,25 +51,41 @@ def verify_access_token(token: str) -> Optional[str]:
 class SupabaseManager:
     """Manages the base Supabase client configuration."""
 
-    _base_client: Optional[Client] = None
     _options = ClientOptions(flow_type="implicit")
 
     @classmethod
     def get_base_client(cls) -> Client:
         """
-        Cliente anónimo compartido, para lecturas sin sesión.
+        Cliente anónimo **nuevo en cada llamada**. Antes era un singleton, y ahí
+        estaba el bug.
 
-        **No usarlo para verificar tokens de usuarios.** Es un singleton de por
-        vida del proceso: cualquier sesión que termine sosteniendo la sostiene
-        hasta el próximo restart. Para eso está `verify_access_token`.
+        Un cliente de `supabase-py` **no es un objeto sin estado**: se suscribe a
+        los eventos de su propio `auth` y, ante `SIGNED_IN` o `TOKEN_REFRESHED`,
+        se reemplaza la cabecera `Authorization` por el access token de esa sesión
+        y descarta su `postgrest` para reconstruirlo con la nueva
+        (`supabase/_sync/client.py:_listen_to_auth_events`, verificado en 2.28.3,
+        la versión que corre en producción).
+
+        `AuthController.login` recibe este cliente por inyección —`/auth/login` no
+        lleva bearer token, así que `provide_supabase_client` caía acá— y le hace
+        `sign_in_with_password`. Con el cliente cacheado, **cada login dejaba al
+        proceso entero firmando con el token de esa persona**. Una hora después,
+        toda consulta anónima —incluida `/health`— devolvía `PGRST303 JWT expired`
+        hasta el próximo restart.
+
+        Crear el cliente por request cuesta poco y sólo pasa en las rutas sin
+        sesión (`/health`, login, registro, recuperación): el camino caliente, la
+        verificación de tokens del guard, ya no pasa por acá sino por
+        `verify_access_token`.
+
+        **No volver a cachearlo.** Mientras cualquier consumidor pueda iniciar
+        sesión sobre el cliente que recibe, compartirlo es compartir esa sesión.
         """
-        if cls._base_client is None:
-            cls._base_client = create_client(
-                supabase_url=settings.supabase_url,
-                supabase_key=settings.supabase_anon_key,
-                options=cls._options
-            )
-        return cls._base_client
+        return create_client(
+            supabase_url=settings.supabase_url,
+            supabase_key=settings.supabase_anon_key,
+            options=cls._options
+        )
 
     @staticmethod
     def get_user_scoped_client(access_token: str) -> Client:
