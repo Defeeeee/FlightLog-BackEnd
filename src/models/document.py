@@ -35,7 +35,9 @@ class Document(BaseModel):
     kind: str = "otro"
     blocking: str = "nada"
     name: str
-    expiry_date: date
+    # Nullable: no todo documento caduca. Una licencia puede ser de por vida, y
+    # sin fecha significa "no vence" — nunca vencido, nunca un aviso.
+    expiry_date: Optional[date] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
@@ -51,7 +53,7 @@ class DocumentCreate(BaseModel):
     kind: str = "otro"
     blocking: str = "nada"
     name: str
-    expiry_date: date
+    expiry_date: Optional[date] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
