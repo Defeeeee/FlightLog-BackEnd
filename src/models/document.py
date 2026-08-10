@@ -4,7 +4,16 @@ from datetime import date, datetime
 from uuid import UUID
 
 #: Mirrors the CHECK constraint on public.documents.kind.
-DOCUMENT_KINDS = ("cma", "licencia", "habilitacion", "seguro", "aeronavegabilidad", "otro")
+#:
+#: `repaso_vuelo` es el repaso de RAAC 61.135: 24 meses, con instructor y firmado en
+#: el libro. Es una de las cuatro condiciones de 61.060(a)(1) para ejercer las
+#: atribuciones de la licencia, y la única que no se puede derivar de los vuelos —
+#: la norma pide una firma, y el libro digital no tiene firmas.
+DOCUMENT_KINDS = (
+    "cma", "licencia", "habilitacion", "seguro", "aeronavegabilidad",
+    "repaso_vuelo",
+    "otro",
+)
 
 
 class Document(BaseModel):
