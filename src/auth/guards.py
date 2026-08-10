@@ -4,7 +4,7 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.connection import Request
 from litestar.exceptions import NotAuthorizedException
 from src.auth.security import AuthHandler
-from src.supabase_client import SupabaseManager
+from src.supabase_client import SupabaseManager, verify_access_token
 
 # Simple in-memory cache for verified tokens to speed up parallel requests
 # Key: token, Value: (user_obj, expiry_timestamp)
@@ -66,14 +66,17 @@ async def auth_guard(connection: Request, _: BaseRouteHandler) -> None:
             del TOKEN_CACHE[token]
 
     try:
-        # Use the base client for verification to avoid create_client overhead
-        client = SupabaseManager.get_base_client()
-        user_response = client.auth.get_user(token)
-        
-        user = user_response.user
-        if not user:
+        # Verificación sin cliente con estado. Antes esto usaba el singleton
+        # anónimo —el mismo que sirve /health—, que quedaba firmando con el token
+        # del último usuario verificado y tiraba PGRST303 en cuanto ese token
+        # vencía, hasta el siguiente restart. Ver `verify_access_token`.
+        user_id = verify_access_token(token)
+
+        if not user_id:
             raise NotAuthorizedException("Invalid token: user not found")
-            
+
+        user = SimpleUser(user_id)
+
         # Cache the result for a short duration
         TOKEN_CACHE[token] = (user, now + CACHE_TTL)
         

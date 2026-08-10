@@ -1,5 +1,5 @@
 litestar[standard]>=2.0.0
-supabase>=2.0.0
+supabase==2.28.3  # pineado: el comportamiento de auth del cliente cambia entre versiones (ver supabase_client.py)
 pydantic-settings>=2.0.0
 pydantic[email]>=2.0.0
 python-dotenv>=1.0.0
