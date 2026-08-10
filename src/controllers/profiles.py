@@ -1,10 +1,31 @@
 from litestar import Controller, get, patch, Request, post
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import InternalServerException, NotFoundException
 from supabase import Client
-from typing import List
+from typing import Dict, List
 from uuid import UUID
 from src.models.profile import Profile, ProfileUpdate
 from src.auth.guards import auth_guard
+
+
+def _parse_name(metadata: Dict) -> Dict[str, str]:
+    """
+    Nombre y apellido a partir de la metadata del usuario.
+
+    Misma regla que `handle_new_user()` en la migración 006, y conviene que sigan
+    iguales: los dos caminos crean la misma fila. La API de Litestar manda
+    `first_name`/`last_name`; Google manda `full_name`/`name`, y si el nombre
+    viene en una sola palabra el apellido queda en el default en vez de repetirlo.
+    """
+    entero = (metadata.get("full_name") or metadata.get("name") or "").strip()
+    partes = entero.split(" ", 1)
+
+    first = (metadata.get("first_name") or "").strip() or partes[0] or "New"
+    last = (metadata.get("last_name") or "").strip()
+    if not last:
+        last = (partes[1].strip() if len(partes) > 1 else "") or "Pilot"
+
+    return {"first_name": first, "last_name": last}
+
 
 class ProfilesController(Controller):
     path = "/profiles"
@@ -17,24 +38,34 @@ class ProfilesController(Controller):
         response = supabase_client.table("profiles").select("*").eq("id", user_id).execute()
 
         if not response.data:
-            # If no profile exists, create a default one for this user
+            # Segunda defensa: el trigger `on_auth_user_created` cubre las altas
+            # nuevas, pero no repara hacia atrás. Esto cura al siguiente login.
+            #
+            # Estuvo muerto hasta la migración 006: `profiles` tenía RLS con
+            # policies de SELECT y UPDATE pero ninguna de INSERT, así que este
+            # insert lo negaba RLS, el `except` se lo tragaba en un print y el
+            # piloto recibía una lista vacía. Cinco usuarios quedaron sin poder
+            # usar la app. **No devolver [] en silencio de nuevo.**
             try:
                 user_res = supabase_client.auth.get_user()
                 if user_res.user:
                     user = user_res.user
-                    # Default values for a new profile
-                    new_profile = {
+                    supabase_client.table("profiles").insert({
                         "id": str(user.id),
-                        "first_name": user.user_metadata.get("first_name") or user.user_metadata.get("full_name", "Comandante").split(" ")[0],
-                        "last_name": user.user_metadata.get("last_name") or " ".join(user.user_metadata.get("full_name", "").split(" ")[1:]),
+                        **_parse_name(user.user_metadata or {}),
                         "license_type": "-",
-                    }
-                    # Insert the new profile
-                    supabase_client.table("profiles").insert(new_profile).execute()
-                    # Re-fetch
+                    }).execute()
                     response = supabase_client.table("profiles").select("*").eq("id", user_id).execute()
             except Exception as e:
-                print(f"Auto-profile creation failed: {str(e)}")
+                print(f"Auto-profile creation failed for {user_id}: {str(e)}")
+                raise InternalServerException(
+                    detail="No se pudo crear el perfil del piloto."
+                ) from e
+
+        if not response.data:
+            raise InternalServerException(
+                detail="No se pudo crear el perfil del piloto."
+            )
 
         return [Profile(**data) for data in response.data]
 
