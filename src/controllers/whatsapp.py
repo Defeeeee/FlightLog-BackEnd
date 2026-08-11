@@ -86,7 +86,18 @@ class WhatsAppController(Controller):
             # diagnosticar, de qué teléfono era no le hace falta a nadie y queda
             # escrito en el disco del server. El sufijo alcanza para correlacionar
             # con lo que reporte el piloto sin guardar el número entero.
-            print(f"[whatsapp] consulta sin perfil para un número terminado en …{clean_phone[-4:]}")
+            #
+            # Largo y prefijo van además del sufijo porque **el sufijo solo no
+            # alcanza para diagnosticar**: el 2026-08-11, al conectar el número de
+            # producción, los últimos cuatro coincidían con el perfil guardado y
+            # aun así no matcheaba. La diferencia estaba en el prefijo, y el log no
+            # la mostraba. Tres dígitos de prefijo y el largo no identifican a
+            # nadie —los comparten millones de números— y son justo lo que hace
+            # falta para ver por qué falló la normalización.
+            print(
+                f"[whatsapp] consulta sin perfil: termina en …{clean_phone[-4:]}, "
+                f"{len(clean_phone)} dígitos, empieza {clean_phone[:3]}"
+            )
             raise NotFoundException("Usuario no registrado con ese número de WhatsApp")
 
         profile = profile_resp.data[0]
