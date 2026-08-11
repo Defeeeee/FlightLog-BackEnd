@@ -103,19 +103,39 @@ class DocumentAlertsController(Controller):
 
     path = "/document-alerts"
 
+    SECRET_HEADER = "X-Cron-Secret"
+
+    def _secret_from(self, request: Request, secret: str | None) -> str:
+        """
+        Cabecera primero, query string como transición.
+
+        **Un secreto en la URL se escribe en los logs.** El access log de nginx y
+        el de uvicorn registran la URL entera, así que programar el barrido diario
+        con `?secret=` sería dejarlo en texto plano en el server todos los días.
+        Ya costó una rotación: durante el plan 07, un log pegado en el chat para
+        diagnosticar otra cosa traía el secreto del webhook en la URL.
+
+        Se aceptan las dos formas a propósito, igual que en `H1.1`. El frontend y
+        el backend se despliegan por separado: exigir la cabecera de entrada
+        cortaría el barrido en la ventana entre un deploy y el otro. **El tercer
+        paso —dejar de aceptar el query string— va después** de confirmar en los
+        logs que no queda ninguna llamada vieja.
+        """
+        return request.headers.get(self.SECRET_HEADER) or (secret or "")
+
     def _verify_secret(self, secret: str) -> None:
         expected = settings.documents_alert_secret
         if not expected:
             # Fail closed: without a configured secret this endpoint would be an
             # unauthenticated read across every pilot's documents.
             raise NotAuthorizedException("Document alert sweep is not configured.")
-        if not hmac.compare_digest(secret, expected):
+        if not secret or not hmac.compare_digest(secret, expected):
             raise NotAuthorizedException("Invalid secret token.")
 
     @get("/pending")
-    async def pending_alerts(self, secret: str) -> List[PendingAlert]:
+    async def pending_alerts(self, request: Request, secret: str | None = None) -> List[PendingAlert]:
         """Documents that have crossed into a new alert bucket since last run."""
-        self._verify_secret(secret)
+        self._verify_secret(self._secret_from(request, secret))
         service_client = SupabaseManager.get_service_client()
 
         documents_resp = service_client.table("documents").select("*").execute()
@@ -160,9 +180,11 @@ class DocumentAlertsController(Controller):
         return pending
 
     @post("/{document_id:uuid}/sent")
-    async def mark_alert_sent(self, document_id: UUID, secret: str, threshold: int) -> Dict[str, Any]:
+    async def mark_alert_sent(
+        self, request: Request, document_id: UUID, threshold: int, secret: str | None = None
+    ) -> Dict[str, Any]:
         """Records that `threshold` was delivered, so it isn't sent again."""
-        self._verify_secret(secret)
+        self._verify_secret(self._secret_from(request, secret))
         service_client = SupabaseManager.get_service_client()
 
         response = (
