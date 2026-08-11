@@ -173,6 +173,7 @@ class DocumentAlertsController(Controller):
                     threshold=threshold,
                     days_remaining=document_alerts.days_until(expiry, today),
                     whatsapp_phone=profile.get("whatsapp_phone"),
+                    first_name=profile.get("first_name"),
                     message=document_alerts.format_alert(doc, threshold, profile.get("first_name")),
                 )
             )

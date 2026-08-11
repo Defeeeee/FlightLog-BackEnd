@@ -80,4 +80,9 @@ class PendingAlert(BaseModel):
     threshold: int
     days_remaining: int
     whatsapp_phone: Optional[str] = None
+    # El nombre de pila va suelto además de embebido en `message`: la plantilla de
+    # WhatsApp lo recibe como parámetro propio. Un envío proactivo tiene que ser
+    # por plantilla —Meta no permite texto libre fuera de la ventana de 24 h— y
+    # una plantilla recibe variables, no una frase ya armada.
+    first_name: Optional[str] = None
     message: str
