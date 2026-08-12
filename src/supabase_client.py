@@ -51,7 +51,43 @@ def verify_access_token(token: str) -> Optional[str]:
 class SupabaseManager:
     """Manages the base Supabase client configuration."""
 
-    _options = ClientOptions(flow_type="implicit")
+    @staticmethod
+    def _options(persist_session: bool = True) -> ClientOptions:
+        """
+        **Options nuevas en cada llamada. Nunca una instancia compartida.**
+
+        Acá estuvo la segunda mitad del bug de sesiones cruzadas, y es la parte
+        que no se ve leyendo el código de Vector. `ClientOptions` declara:
+
+            storage: SyncSupportedStorage = field(default_factory=SyncMemoryStorage)
+
+        El `default_factory` da un storage nuevo **por instancia de options**. Pero
+        `supabase-py` hace `self.options = copy.copy(options)` —copia
+        **superficial**— y sólo rehace el dict de `headers`: **el `storage` sigue
+        siendo el mismo objeto** (`_sync/client.py:72-74`, verificado en 2.28.3).
+
+        Con un único `ClientOptions` compartido, todos los clientes del proceso
+        comparten un storage de sesión. Entonces:
+
+          1. `AuthController.login` hace `sign_in_with_password` y la sesión del
+             piloto queda guardada ahí.
+          2. Cualquier cliente creado después —incluido el de **service role**—
+             nace con ese storage, recupera la sesión, dispara `SIGNED_IN`, y
+             `_listen_to_auth_events` le pisa el `Authorization` con el token de
+             ese usuario.
+          3. PostgREST prioriza `Authorization` sobre `apikey`: el cliente de
+             service role pasa a consultar como `authenticated` y **RLS le tapa
+             las filas de los demás**.
+
+        Medido en los logs de Supabase el 2026-08-12: el barrido de vencimientos
+        salía con `apikey=service_role` y `authorization=authenticated`, y traía
+        3 de 6 documentos. Los del resto de los pilotos eran invisibles, sin ningún
+        error: devolvía una lista vacía como si no hubiera nada por avisar.
+
+        `persist_session=False` para el cliente de service role: no representa a
+        nadie y no tiene por qué guardar ni recuperar sesiones.
+        """
+        return ClientOptions(flow_type="implicit", persist_session=persist_session)
 
     @classmethod
     def get_base_client(cls) -> Client:
@@ -84,7 +120,7 @@ class SupabaseManager:
         return create_client(
             supabase_url=settings.supabase_url,
             supabase_key=settings.supabase_anon_key,
-            options=cls._options
+            options=cls._options()
         )
 
     @staticmethod
@@ -95,7 +131,7 @@ class SupabaseManager:
         client = create_client(
             supabase_url=settings.supabase_url,
             supabase_key=settings.supabase_anon_key,
-            options=SupabaseManager._options
+            options=SupabaseManager._options()
         )
         
         # 1. Set for Database operations (Postgrest/RLS)
@@ -109,12 +145,33 @@ class SupabaseManager:
 
     @staticmethod
     def get_service_client() -> Client:
-        """Returns a Supabase client using the service role key (bypasses RLS)."""
+        """
+        Cliente de service role, que salta RLS y corre sobre todos los usuarios.
+
+        `persist_session=False`: este cliente no representa a ningún piloto, así
+        que no tiene por qué guardar ni **recuperar** sesiones. Sin eso heredaba la
+        del último login por el storage compartido y terminaba consultando como
+        `authenticated`, con RLS tapándole las filas ajenas. Ver `_options`.
+
+        **El fallback a la clave anónima es peligroso y por eso avisa.** Un barrido
+        que corre sobre todos los usuarios y de golpe ve sólo los de uno no falla:
+        devuelve menos filas, en silencio. Sin este log, descubrirlo cuesta lo que
+        costó el 2026-08-12.
+        """
         if not settings.supabase_service_role_key:
-            return create_client(settings.supabase_url, settings.supabase_anon_key, options=SupabaseManager._options)
-        
+            print(
+                "[supabase] SUPABASE_SERVICE_ROLE_KEY no está configurada: "
+                "cayendo a la clave anónima. Todo lo que corra sobre varios "
+                "usuarios (barrido de vencimientos, WhatsApp) va a ver de menos."
+            )
+            return create_client(
+                settings.supabase_url,
+                settings.supabase_anon_key,
+                options=SupabaseManager._options(persist_session=False),
+            )
+
         return create_client(
             supabase_url=settings.supabase_url,
             supabase_key=settings.supabase_service_role_key,
-            options=SupabaseManager._options
+            options=SupabaseManager._options(persist_session=False),
         )
