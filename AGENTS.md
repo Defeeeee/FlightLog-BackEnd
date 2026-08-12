@@ -153,3 +153,65 @@ rutas del dashboard, todas por este guard.
 > sin reiniciar**, y pegarle a `/health`. Antes de este cambio eso devolvía 500. Es
 > la única que distingue "arreglado" de "recién reiniciado", y es exactamente la
 > que faltó el 2026-08-04.
+
+### 2026-08-12 15:50 UTC — Claude (Opus 5, vía Claude Code) — El cliente de service role consultaba como usuario, y el barrido no se quejaba
+
+**Quién:** Claude Opus 5 corriendo en Claude Code, para Federico Díaz Nemeth.
+
+**Qué cambié:**
+- `src/supabase_client.py` — `_options` pasa de atributo de clase compartido a **método que devuelve una instancia nueva**. El cliente de service role va con `persist_session=False`. El fallback a la clave anónima ahora avisa por log.
+- `src/controllers/documents.py` — el barrido acepta el secreto por `X-Cron-Secret` además del query string (paso 1 de 3 de `H1.1` aplicado acá). `PendingAlert` expone `first_name` para la plantilla de WhatsApp.
+- `src/controllers/whatsapp.py` — el log del teléfono sin match dice largo y prefijo, no sólo el sufijo.
+
+**Por qué:** el barrido de vencimientos devolvía `[]` **con 200 y sin ningún error**. Los logs de Supabase mostraron esto:
+
+```
+GET /rest/v1/documents?select=*
+apikey        = service_role
+authorization = authenticated      <- el token de un piloto
+content_range = 0-2/*              <- 3 filas de 6
+```
+
+**PostgREST prioriza `Authorization` sobre `apikey`.** El cliente de service role consultaba como usuario común, RLS le tapaba las filas ajenas, y el documento vencido de otro piloto era invisible.
+
+La causa: `ClientOptions` crea su `storage` con `default_factory` —uno nuevo por instancia— pero `supabase-py` hace `copy.copy(options)`, copia **superficial**, y sólo rehace el dict de `headers`. **El `storage` queda siendo el mismo objeto** (`_sync/client.py:72-74`, 2.28.3). Con un único `ClientOptions` de clase, todos los clientes del proceso comparten el depósito de sesiones: `login` guarda la del piloto y cualquier cliente posterior la recupera, dispara `SIGNED_IN`, y se pisa el `Authorization`.
+
+Probado con el paquete real, no deducido:
+
+```
+compartidas: a.storage is b.storage -> True   y la sesión se lee cruzada
+nuevas:      c.storage is d.storage -> False  y no se lee
+```
+
+> **Era la segunda mitad del bug del 2026-08-10.** Descachear `get_base_client()`
+> arregló `/health` porque ahí lo compartido era el **cliente**. Acá lo compartido
+> son las **options**, y por eso crear un cliente nuevo por llamada no alcanzaba:
+> todos nacían apuntando al mismo storage. **Cuando aparezca contaminación de
+> sesión, revisar los dos niveles.**
+
+**Lo más importante para el próximo, que no es el bug:**
+
+> **El barrido nunca falló.** Devolvía 200 y una lista vacía, indistinguible de
+> "no hay nada por avisar". Si el cron hubiera estado puesto, habría corrido en
+> verde todos los días avisándole a un solo piloto, y no había forma de notarlo
+> desde afuera. Un proceso que corre sobre **todos** los usuarios y de golpe ve los
+> de uno **tiene que gritar**. Por eso el fallback a la clave anónima ahora
+> loguea — pero el problema general sigue abierto: nadie se entera de que un
+> barrido silencioso dejó de ver gente.
+
+**Cómo se diagnosticó, que es reusable:** los `edge_logs` de Supabase tienen
+`request.sb.jwt.apikey.payload.role` y `request.sb.jwt.authorization.payload.role`
+por separado, más `response.headers.content_range` con el conteo de filas. Ver esos
+tres juntos fue lo que lo resolvió; leer el código no alcanzaba, porque el código
+está bien.
+
+⚠️ **Al consultar logs, fijar la ventana con la fecha correcta.** Se perdió una
+vuelta mirando los logs del día anterior y sacando conclusiones de ahí.
+
+**Estado:** Terminado y desplegado. `T1.1` cerrada: el cron quedó instalado el
+2026-08-12 (`0 12 * * *`, 09:00 ART).
+
+**Verificación:** antes y después en la misma consulta de Supabase —
+`authorization=authenticated` con `0-2/*` pasó a `authorization=service_role` con
+`0-5/*`— y el barrido devuelve `{"pending":1,"sent":0,"skipped":1,"failed":0}`. El
+`skipped` es un piloto sin WhatsApp, que queda **sin marcar** a propósito.
