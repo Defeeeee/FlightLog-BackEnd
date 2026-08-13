@@ -182,9 +182,22 @@ class DocumentAlertsController(Controller):
 
     @post("/{document_id:uuid}/sent")
     async def mark_alert_sent(
-        self, request: Request, document_id: UUID, threshold: int, secret: str | None = None
+        self,
+        request: Request,
+        document_id: UUID,
+        threshold: int,
+        message_id: str | None = None,
+        secret: str | None = None,
     ) -> Dict[str, Any]:
-        """Records that `threshold` was delivered, so it isn't sent again."""
+        """
+        Records that `threshold` was handed to WhatsApp, so it isn't sent again.
+
+        `message_id` es el wamid que devolvió Meta al aceptar el envío, y es lo que
+        después permite deshacer esta marca: el webhook de `failed` sólo trae ese
+        id. Es opcional a propósito —si el envío se aceptó pero la respuesta no
+        traía id, marcar igual es mejor que mandarlo de nuevo todos los días— pero
+        un documento marcado sin id **no se puede reintentar automáticamente**.
+        """
         self._verify_secret(self._secret_from(request, secret))
         service_client = SupabaseManager.get_service_client()
 
@@ -194,6 +207,7 @@ class DocumentAlertsController(Controller):
                 {
                     "last_alert_threshold": threshold,
                     "last_alert_at": datetime.now(timezone.utc).isoformat(),
+                    "last_alert_message_id": message_id,
                 }
             )
             .eq("id", str(document_id))
@@ -202,3 +216,55 @@ class DocumentAlertsController(Controller):
         if not response.data:
             raise NotFoundException(f"Document with ID {document_id} not found")
         return {"success": True, "document_id": str(document_id), "threshold": threshold}
+
+    @post("/failed")
+    async def mark_alert_failed(
+        self, request: Request, message_id: str, secret: str | None = None
+    ) -> Dict[str, Any]:
+        """
+        Deshace la marca de un aviso que Meta terminó no entregando.
+
+        Kapso acepta el envío y responde 2xx mucho antes de que Meta resuelva la
+        entrega. Cuando esa resolución es `failed`, el documento ya quedó marcado y
+        `should_alert` no vuelve a disparar hasta el umbral siguiente: el aviso de
+        los 60 días se pierde entero y el piloto se entera un mes tarde. Limpiar la
+        marca devuelve el documento al estado de "nunca avisado" y el barrido del
+        día siguiente lo reintenta solo.
+
+        **No es un error que ningún documento coincida.** Meta manda un status por
+        cada mensaje que sale, incluidos los del copiloto, y a este endpoint le
+        llegan todos los `failed`. Un id desconocido responde 200 con
+        `matched: false` — devolver 404 haría que el webhook loguee un fallo por
+        cada respuesta del copiloto que no se entregó.
+
+        Tampoco se restaura el umbral anterior: `should_alert` recalcula el bucket
+        que corresponde hoy a partir de la fecha, así que dejar las columnas en NULL
+        es suficiente y no hay que llevar historia.
+        """
+        self._verify_secret(self._secret_from(request, secret))
+        if not message_id:
+            raise ValidationException("message_id is required")
+
+        service_client = SupabaseManager.get_service_client()
+        response = (
+            service_client.table("documents")
+            .update(
+                {
+                    "last_alert_threshold": None,
+                    "last_alert_at": None,
+                    "last_alert_message_id": None,
+                }
+            )
+            .eq("last_alert_message_id", message_id)
+            .execute()
+        )
+
+        matched = list(response.data or [])
+        if matched:
+            # Vale un log: es un aviso que un piloto no recibió, y la única señal de
+            # que el canal está fallando para alguien en particular.
+            print(
+                f"[document-alerts] entrega fallida, marca limpiada para "
+                f"{len(matched)} documento(s): {[d.get('id') for d in matched]}"
+            )
+        return {"success": True, "matched": bool(matched), "cleared": len(matched)}
