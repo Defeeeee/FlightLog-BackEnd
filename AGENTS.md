@@ -252,3 +252,50 @@ decía evitar estaba ocurriendo igual.
 **Estado:** Terminado. Migración aplicada y verificada contra la base.
 
 **Verificación:** `python3 test_audit_engine.py` — 16/16.
+
+### 2026-08-14 01:45 UTC — Claude (Opus 5, vía Claude Code) — Vuelos programados: por qué tabla aparte
+
+**Quién:** Claude (Opus 5) trabajando para Federico Díaz Nemeth.
+
+**Qué agregué:**
+- `migrations/009_planned_flights.sql`
+- `src/models/planned_flight.py`, `src/controllers/planned_flights.py`
+  (`/planned-flights`), + 1 línea en `src/app.py`.
+
+**Por qué una tabla y no un `status` en `flights`** — tres motivos, en orden de peso,
+y el tercero es el que casi nadie ve:
+
+1. `flights` tiene `NOT NULL` en `landings`, `duration`, `takeoff`, `landing` y
+   `purpose`. Un plan no tiene ninguno de los cinco. Meterlo ahí obliga a aflojar las
+   restricciones de la tabla que **es** el documento legal.
+2. Toda consulta agregada leería vuelos que no ocurrieron salvo que le agreguen un
+   filtro nuevo. Un filtro olvidado infla las horas de alguien ante ANAC, y no se ve.
+3. **`create_flight` tiene efectos.** Llama a `_sync_flight_transaction`, que en modo
+   balance **le cobra la hora al saldo del piloto**, y después recalcula la auditoría.
+   Un plan viviendo en `flights` cobraría plata por un vuelo que no ocurrió, y la
+   regla de superposición de la auditoría empezaría a marcar planes contra vuelos.
+
+**Invariante:** ninguna función de agregación recibe jamás una fila de esta tabla.
+
+**Otras dos decisiones:**
+
+- **Índice único parcial sobre `flight_id`.** Un vuelo no puede cerrar dos planes;
+  sin eso, dos planes del mismo día apuntando al mismo vuelo hacen que el calendario
+  muestre dos vuelos donde hay uno.
+- **RLS con las cuatro políticas explícitas**, no la `for all` de `custom_stats`. La
+  migración 006 es la advertencia: a `profiles` le faltaba la de `insert` y rompió en
+  silencio para 5 de 15 usuarios. Cuatro políticas escritas hacen visible cuál falta.
+
+`GET /planned-flights` **no filtra por estado ni por fecha** a propósito: quién
+muestra qué lo decide `src/lib/planned-flights.ts` en el frontend, que es puro y
+testeado. Filtrar acá partiría esa lógica en dos lugares.
+
+**Estado:** Terminado y pusheado. **La migración no está aplicada** — es aditiva, y
+el frontend degrada a lista vacía si el endpoint no existe, así que el orden de los
+dos deploys no importa.
+
+**Verificación:** sólo `python3 -m py_compile` sobre los tres archivos. **`litestar`
+no está instalado en el entorno del agente** y `pip install -r requirements.txt`
+falla por un `PyJWT` que instaló Debian sin `RECORD`, así que el
+`python -c "import src.app"` lo corre el CI y no yo. **Mirar ese job en verde antes
+de mergear:** un import mal escrito en `src/app.py` tira el proceso al arrancar.
