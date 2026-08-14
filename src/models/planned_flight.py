@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -26,6 +26,10 @@ class PlannedFlightBase(BaseModel):
     #: Mismo formato que `flights.route`: ICAO separados por espacio.
     route: Optional[str] = None
     notes: Optional[str] = None
+    #: Horas tentativas, **en UTC** — misma convención que `flights.takeoff`.
+    #: El interruptor local/UTC del frontend sólo cambia lo que se muestra.
+    takeoff_time: Optional[time] = None
+    landing_time: Optional[time] = None
 
 
 class PlannedFlightCreate(PlannedFlightBase):
@@ -42,6 +46,8 @@ class PlannedFlightUpdate(BaseModel):
     aircraft_id: Optional[UUID] = None
     route: Optional[str] = None
     notes: Optional[str] = None
+    takeoff_time: Optional[time] = None
+    landing_time: Optional[time] = None
     status: Optional[Literal["programado", "completado", "descartado"]] = None
     flight_id: Optional[UUID] = None
     postponed_until: Optional[date] = None
