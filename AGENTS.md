@@ -215,3 +215,40 @@ vuelta mirando los logs del día anterior y sacando conclusiones de ahí.
 `authorization=authenticated` con `0-2/*` pasó a `authorization=service_role` con
 `0-5/*`— y el barrido devuelve `{"pending":1,"sent":0,"skipped":1,"failed":0}`. El
 `skipped` es un piloto sin WhatsApp, que queda **sin marcar** a propósito.
+
+### 2026-08-13 20:30 UTC — Claude (Opus 5, vía Claude Code) — El barrido podía perder un aviso entero sin enterarse
+
+**Quién:** Claude (Opus 5) trabajando para Federico Díaz Nemeth.
+
+**Qué cambié:**
+- `migrations/008_documents_alert_message_id.sql` — columna
+  `documents.last_alert_message_id`, y `documents_reset_alerts()` reescrita para
+  limpiarla también cuando cambia `expiry_date`.
+- `src/controllers/documents.py` — `/document-alerts/{id}/sent` acepta y guarda
+  `message_id`; nuevo `POST /document-alerts/failed` que busca por ese id y limpia
+  la marca.
+- `test_audit_engine.py` — dos casos sobre `should_alert` para la invariante del
+  reintento.
+
+**Por qué:** el docstring de `DocumentAlertsController` dice que el marcado se
+separa del envío para no quemar el aviso de 60 días en un envío fallido. La
+separación es correcta, pero el frontend llamaba a `/sent` con la **aceptación de
+Kapso**, no con la entrega de Meta, así que el modo de falla que el comentario
+decía evitar estaba ocurriendo igual.
+
+**Tres decisiones:**
+- **Un id desconocido responde 200 con `matched: false`, no 404.** Por este
+  endpoint pasan los `failed` de *todos* los mensajes que salen, incluidas las
+  respuestas del copiloto. Que no coincida ningún documento es lo normal;
+  devolver 404 haría que el webhook loguee un error por cada una.
+- **No se restaura el umbral anterior**, se deja en NULL. `should_alert` recalcula
+  el bucket que corresponde hoy a partir de la fecha, así que no hay que llevar
+  historia.
+- **El trigger tenía que limpiar la columna nueva.** Si no, renovar un documento
+  re-arma la escalera pero deja colgado el id del aviso anterior, y un `failed`
+  tardío de ese mensaje viejo limpiaría una marca que ya no le corresponde — el
+  piloto recibiría un aviso de un vencimiento que ya renovó.
+
+**Estado:** Terminado. Migración aplicada y verificada contra la base.
+
+**Verificación:** `python3 test_audit_engine.py` — 16/16.

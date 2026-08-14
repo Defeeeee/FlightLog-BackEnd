@@ -169,6 +169,25 @@ def main() -> bool:
     doc_expired_sent = {**doc_expired, "last_alert_threshold": document_alerts.EXPIRED_BUCKET}
     ok &= check("no repite el aviso de vencido", document_alerts.should_alert(doc_expired_sent, today) is None)
 
+    # Entrega fallida: el webhook de `failed` deja las columnas de marca en NULL, y
+    # de eso depende que el aviso se reintente. Es la invariante que sostiene todo
+    # el arreglo del marcado, y es pura aritmética de fechas, así que se testea.
+    #
+    # Importa que vuelva a disparar el bucket que corresponde **hoy** y no el que se
+    # había mandado: si el fallo se detecta cuando el documento ya bajó de 30 a 7,
+    # reintentar el de 30 sería avisar de más días de los que quedan.
+    doc_fallido = {**doc_sent_60, "last_alert_threshold": None}
+    ok &= check(
+        "un aviso desmarcado por entrega fallida se reintenta",
+        document_alerts.should_alert(doc_fallido, today) == 60,
+    )
+
+    doc_fallido_mas_cerca = {**doc_fallido, "expiry_date": "2026-08-20"}
+    ok &= check(
+        "al reintentar avisa el bucket de hoy, no el que falló",
+        document_alerts.should_alert(doc_fallido_mas_cerca, today) == 30,
+    )
+
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))
     return bool(ok)
 
