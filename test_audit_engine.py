@@ -9,6 +9,7 @@ with `python test_audit_engine.py`.
 from datetime import date
 
 from src.services import audit_engine as engine
+from src.services import derived_expiries
 from src.services import document_alerts
 
 
@@ -186,6 +187,33 @@ def main() -> bool:
     ok &= check(
         "al reintentar avisa el bucket de hoy, no el que falló",
         document_alerts.should_alert(doc_fallido_mas_cerca, today) == 30,
+    )
+
+    # Vencimientos derivados (migración 011). La aritmética es lo único de
+    # `derived_expiries` que no toca la base, y es lo que decide la fecha que
+    # después bloquea el semáforo y dispara los avisos.
+    ok &= check(
+        "el vencimiento derivado suma los días al último vuelo",
+        derived_expiries.derived_expiry(date(2026, 8, 1), 60) == date(2026, 9, 30),
+    )
+
+    # Sin vuelos no hay ancla: None significa "no vence" desde la migración 007,
+    # que es lo correcto para una cuenta que todavía no empezó a correr.
+    ok &= check(
+        "sin vuelos, el vencimiento derivado queda en None",
+        derived_expiries.derived_expiry(None, 60) is None,
+    )
+
+    ok &= check(
+        "sin offset no se inventa una fecha",
+        derived_expiries.derived_expiry(date(2026, 8, 1), None) is None,
+    )
+
+    # Cruzar el fin de mes y el año bisiesto: timedelta lo resuelve, pero es la
+    # clase de cuenta que se rompe si alguien la reescribe a mano con meses.
+    ok &= check(
+        "el offset cruza el fin de año",
+        derived_expiries.derived_expiry(date(2023, 12, 20), 90) == date(2024, 3, 19),
     )
 
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))

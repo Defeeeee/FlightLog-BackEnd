@@ -9,8 +9,16 @@ from supabase import Client
 
 from src.auth.guards import auth_guard
 from src.config import settings
-from src.models.document import DOCUMENT_KINDS, Document, DocumentCreate, DocumentUpdate, PendingAlert
-from src.services import document_alerts
+from src.models.document import (
+    DOCUMENT_KINDS,
+    EXPIRY_RULES,
+    MAX_EXPIRY_OFFSET_DAYS,
+    Document,
+    DocumentCreate,
+    DocumentUpdate,
+    PendingAlert,
+)
+from src.services import derived_expiries, document_alerts
 from src.supabase_client import SupabaseManager
 
 
@@ -33,6 +41,61 @@ class DocumentsController(Controller):
         )
         return [Document(**row) for row in response.data or []]
 
+    @staticmethod
+    def _apply_expiry_rule(payload: Dict[str, Any]) -> None:
+        """
+        Deja `payload` coherente entre la regla, el offset y la fecha. Muta en sitio.
+
+        Espeja el CHECK de la migración 011 para que un formulario mal armado dé un
+        400 con texto en vez de una violación de restricción de Postgres, y hace
+        además lo que el CHECK no puede: con una regla derivada **borra la fecha que
+        haya llegado**. Esa columna pasa a tener un solo escritor —el recálculo— y
+        dejar entrar la que mandó el formulario es abrir un segundo.
+        """
+        if "expiry_rule" not in payload:
+            return
+
+        rule = payload.get("expiry_rule") or "fijo"
+        if rule not in EXPIRY_RULES:
+            raise ValidationException(f"expiry_rule must be one of {', '.join(EXPIRY_RULES)}")
+
+        payload["expiry_rule"] = rule
+
+        if rule == "fijo":
+            # Un offset sobre una regla fija es un número que nadie lee, y el CHECK
+            # lo rechaza. Volver a 'fijo' tiene que limpiarlo.
+            payload["expiry_offset_days"] = None
+            return
+
+        offset = payload.get("expiry_offset_days")
+        if not isinstance(offset, int) or not 1 <= offset <= MAX_EXPIRY_OFFSET_DAYS:
+            raise ValidationException(
+                f"expiry_offset_days must be between 1 and {MAX_EXPIRY_OFFSET_DAYS} "
+                "when expiry_rule is 'ultimo_vuelo'"
+            )
+
+        payload["expiry_date"] = None
+
+    @staticmethod
+    def _reread(supabase_client: Client, document_id: str, user_id: str) -> Document:
+        """
+        Relee el documento después de recalcular.
+
+        El insert/update devolvió la fila **antes** de que el recálculo escribiera la
+        fecha derivada, así que devolver esa sería contestar con un `expiry_date`
+        nulo un documento que sí tiene vencimiento.
+        """
+        response = (
+            supabase_client.table("documents")
+            .select("*")
+            .eq("id", document_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not response.data:
+            raise NotFoundException(f"Document with ID {document_id} not found")
+        return Document(**response.data[0])
+
     @post()
     async def create_document(
         self, request: Request, supabase_client: Client, data: DocumentCreate
@@ -40,11 +103,21 @@ class DocumentsController(Controller):
         if data.kind not in DOCUMENT_KINDS:
             raise ValidationException(f"kind must be one of {', '.join(DOCUMENT_KINDS)}")
 
+        user_id = str(request.state.user.id)
         insert_data = data.model_dump(mode="json")
-        insert_data["user_id"] = str(request.state.user.id)
+        insert_data["user_id"] = user_id
+        self._apply_expiry_rule(insert_data)
 
         response = supabase_client.table("documents").insert(insert_data).execute()
-        return Document(**response.data[0])
+        created = Document(**response.data[0])
+
+        if created.expiry_rule != "fijo":
+            # Recién cargada la regla, la fecha todavía no existe. Sin esto el
+            # documento se queda sin vencimiento hasta el próximo vuelo.
+            derived_expiries.recompute_for_user_safe(supabase_client, user_id)
+            return self._reread(supabase_client, str(created.id), user_id)
+
+        return created
 
     @patch("/{document_id:uuid}")
     async def update_document(
@@ -57,6 +130,7 @@ class DocumentsController(Controller):
             raise ValidationException(f"kind must be one of {', '.join(DOCUMENT_KINDS)}")
         if not update_data:
             raise ValidationException("No fields to update")
+        self._apply_expiry_rule(update_data)
 
         response = (
             supabase_client.table("documents")
@@ -67,7 +141,15 @@ class DocumentsController(Controller):
         )
         if not response.data:
             raise NotFoundException(f"Document with ID {document_id} not found")
-        return Document(**response.data[0])
+        updated = Document(**response.data[0])
+
+        if updated.expiry_rule != "fijo":
+            # Pasar a regla derivada, o cambiarle el offset, tiene que mover la
+            # fecha ahora y no en el próximo vuelo.
+            derived_expiries.recompute_for_user_safe(supabase_client, user_id)
+            return self._reread(supabase_client, str(document_id), user_id)
+
+        return updated
 
     @delete("/{document_id:uuid}")
     async def delete_document(

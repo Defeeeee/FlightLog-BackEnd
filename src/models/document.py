@@ -28,6 +28,20 @@ DOCUMENT_KINDS = (
 #: que lo renueva—; 'vuelo' no deja volar.
 BLOCKING_LEVELS = ("nada", "pasajeros", "solo", "vuelo")
 
+#: Quién escribe `documents.expiry_date`. Mirrors the CHECK on documents.expiry_rule.
+#:
+#: 'fijo' es lo de siempre: el piloto escribe la fecha. 'ultimo_vuelo' la calcula el
+#: backend sumando `expiry_offset_days` a la fecha del vuelo más reciente, y la
+#: recalcula cada vez que los vuelos del piloto cambian — que es lo que hace que un
+#: requisito del tipo "60 días sin volar y necesitás adaptación" deje de estar mal
+#: al día siguiente de escribirlo. Ver `src/services/derived_expiries.py`.
+EXPIRY_RULES = ("fijo", "ultimo_vuelo")
+
+#: Tope del offset, espejo del CHECK. No es regulatorio: es un guardarraíl contra un
+#: dedo de más en el formulario.
+MAX_EXPIRY_OFFSET_DAYS = 3650
+
+
 
 class Document(BaseModel):
     id: UUID
@@ -38,6 +52,10 @@ class Document(BaseModel):
     # Nullable: no todo documento caduca. Una licencia puede ser de por vida, y
     # sin fecha significa "no vence" — nunca vencido, nunca un aviso.
     expiry_date: Optional[date] = None
+    # Con 'ultimo_vuelo', `expiry_date` de arriba es una caché que escribe el
+    # backend: la fuente es esta regla más el offset. Ver EXPIRY_RULES.
+    expiry_rule: str = "fijo"
+    expiry_offset_days: Optional[int] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
@@ -54,6 +72,8 @@ class DocumentCreate(BaseModel):
     blocking: str = "nada"
     name: str
     expiry_date: Optional[date] = None
+    expiry_rule: str = "fijo"
+    expiry_offset_days: Optional[int] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
@@ -64,6 +84,8 @@ class DocumentUpdate(BaseModel):
     blocking: Optional[str] = None
     name: Optional[str] = None
     expiry_date: Optional[date] = None
+    expiry_rule: Optional[str] = None
+    expiry_offset_days: Optional[int] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: Optional[List[int]] = None

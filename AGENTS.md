@@ -348,3 +348,53 @@ fondo; el resto es la carrera que lo disparaba.
 
 **Regla que queda:** una respuesta degradada nunca se devuelve indistinguible de una
 respuesta vacía legítima. Si una sección no se pudo leer, el payload lo dice.
+
+---
+
+## Vencimientos que se mueven solos — 2026-08-14
+
+Pedido de Federico: «que se puedan setear vencimientos variables, por ejemplo en base
+a la fecha del último vuelo, que se actualiza constantemente».
+
+`documents.expiry_rule` con dos valores. `'fijo'` es todo lo que había: el piloto
+escribe la fecha. `'ultimo_vuelo'` la calcula el backend sumando
+`expiry_offset_days` a la fecha del vuelo más reciente.
+
+**`expiry_date` no cambia de significado**, y esa es la decisión de diseño. Sigue
+siendo la fecha de vencimiento para el semáforo, para `documentStatus`, para el orden
+de `GET /documents` y para el barrido de avisos. Lo único que cambia es quién la
+escribe. Nada del resto del sistema se entera de que existen reglas.
+
+**Se guarda calculada, no se deriva al leer.** El barrido de vencimientos corre de
+noche sobre `documents` de todos los pilotos filtrando por `expiry_date`; derivarla
+en cada lectura lo obligaría a traerse los vuelos de cada uno para resolver una
+fecha. La caché tiene **un solo escritor**, `src/services/derived_expiries.py`, que
+corre desde tres lugares: alta, edición y baja de vuelo (el ancla se movió) y alta o
+edición del documento (la regla es nueva y la fecha todavía no existe).
+
+Cuatro cosas que no se deducen del código:
+
+- **`recompute_for_user_safe` nunca voltea la escritura que lo disparó**, igual que
+  `_refresh_audit`. El peor caso es una fecha de ayer; perder el vuelo que el piloto
+  acaba de cargar sería peor.
+- **Sólo escribe lo que cambió.** El trigger `documents_reset_alerts` borra la marca
+  del último aviso cuando `expiry_date` cambia, así que un update de más hace que el
+  piloto reciba dos veces el mismo aviso de 30 días por haber cargado un vuelo.
+- **Arranca por los documentos, no por los vuelos.** Casi nadie tiene reglas
+  cargadas, y para esos el recálculo cuesta una consulta que vuelve vacía.
+- **Sin vuelos, `expiry_date` queda en NULL**, que desde la 007 es "no vence". Es lo
+  correcto: una cuenta que arranca con el último vuelo, sin ningún vuelo, no arrancó.
+
+`_apply_expiry_rule` espeja el CHECK de la migración para dar un 400 con texto en vez
+de una violación de restricción, y hace además lo que el CHECK no puede: con una
+regla derivada **descarta la `expiry_date` que haya mandado el formulario**, para que
+esa columna no tenga dos escritores.
+
+**Estado:** código pusheado. **La migración 011 NO está aplicada.** Es aditiva —dos
+columnas con default, toda fila existente queda en `'fijo'`, que es literalmente lo
+que ya son—, así que el orden de migración y deploy no importa. Sin ella, el backend
+manda `expiry_rule` en el insert y Postgres rechaza la columna desconocida: aplicarla
+**antes** del deploy del backend.
+
+**Verificación:** `python3 test_audit_engine.py` en verde, con cuatro checks nuevos
+sobre `derived_expiry`. El resto necesita base y no corrió acá.
