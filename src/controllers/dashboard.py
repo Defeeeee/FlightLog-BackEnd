@@ -31,6 +31,13 @@ class DashboardController(Controller):
         `return_exceptions=True` conserva el comportamiento anterior: cada sección
         tenía su propio try/except y una que falle no debe vaciar el resto de la
         pantalla.
+
+        **Pero una sección que falla ya no se calla.** Devolver `[]` es una
+        afirmación: "no hay filas". Cuando lo que pasó es "no pude preguntar", el
+        frontend la creía y sacaba conclusiones sobre el piloto —el semáforo le
+        decía "no tenés certificado médico" a alguien que sí lo tiene cargado—.
+        `unavailable` lleva los nombres de las secciones que fallaron para que del
+        otro lado se pueda distinguir "no hay" de "no sé".
         """
         user_id = str(request.state.user.id)
 
@@ -80,36 +87,46 @@ class DashboardController(Controller):
             return_exceptions=True,
         )
 
-        def _rows(resp) -> list:
-            """Filas de una respuesta, o vacío si esa consulta falló."""
+        unavailable: list[str] = []
+
+        def _rows(name: str, resp) -> list:
+            """
+            Filas de una respuesta.
+
+            Si esa consulta falló devuelve vacío **y anota la sección en
+            `unavailable`**, que es lo que separa "el piloto no tiene documentos"
+            de "no pudimos leer los documentos del piloto".
+            """
             if isinstance(resp, Exception):
-                print(f"Consolidated dashboard error: {resp}")
+                print(f"Consolidated dashboard error [{name}]: {resp!r}")
+                unavailable.append(name)
                 return []
             return resp.data or []
 
-        profile_rows = _rows(profile_resp)
+        profile_rows = _rows("profile", profile_resp)
         profile = profile_rows[0] if profile_rows else None
 
-        aircraft = _rows(aircraft_resp)
+        aircraft = _rows("aircraft", aircraft_resp)
 
-        flights = [Flight(**data).model_dump(mode="json") for data in _rows(flights_resp)]
+        flights = [Flight(**data).model_dump(mode="json") for data in _rows("flights", flights_resp)]
 
-        session_rows = _rows(session_resp)
+        session_rows = _rows("session", session_resp)
         session_data = session_rows[0] if session_rows else None
 
         packs_data = []
         if isinstance(packs_result, Exception):
-            print(f"Consolidated dashboard packs error: {packs_result}")
+            print(f"Consolidated dashboard error [packs]: {packs_result!r}")
+            unavailable.append("packs")
         else:
             packs_data = [p.model_dump(mode="json") for p in packs_result]
 
         transactions_data = [
-            Transaction(**tx).model_dump(mode="json") for tx in _rows(transactions_resp)
+            Transaction(**tx).model_dump(mode="json") for tx in _rows("transactions", transactions_resp)
         ]
         balance = sum(tx["amount"] for tx in transactions_data)
 
         audit_summary = {"critical": 0, "warning": 0, "suppressed": 0, "open_total": 0}
-        for row in _rows(findings_resp):
+        for row in _rows("audit", findings_resp):
             if row.get("suppressed"):
                 audit_summary["suppressed"] += 1
             elif row.get("severity") == "critical":
@@ -118,9 +135,11 @@ class DashboardController(Controller):
                 audit_summary["warning"] += 1
         audit_summary["open_total"] = audit_summary["critical"] + audit_summary["warning"]
 
-        documents_data = _rows(documents_resp)
+        documents_data = _rows("documents", documents_resp)
 
         return {
+            # Secciones que no se pudieron leer. Vacía en el caso normal.
+            "unavailable": unavailable,
             "profile": profile,
             "aircraft": aircraft,
             "flights": flights,

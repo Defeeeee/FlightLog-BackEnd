@@ -299,3 +299,52 @@ no está instalado en el entorno del agente** y `pip install -r requirements.txt
 falla por un `PyJWT` que instaló Debian sin `RECORD`, así que el
 `python -c "import src.app"` lo corre el CI y no yo. **Mirar ese job en verde antes
 de mergear:** un import mal escrito en `src/app.py` tira el proceso al arrancar.
+
+---
+
+## "No tenés CMA" a un piloto que sí lo tiene — 2026-08-14
+
+**Síntoma reportado:** «hay veces que me logueo y me dice que no tengo CMA hasta que
+voy hasta el hangar», con el CMA efectivamente cargado. Intermitente, y se arreglaba
+solo al pasar por otra pantalla.
+
+**La cadena, de abajo hacia arriba:**
+
+1. `get_user_scoped_client` hacía `postgrest.auth(token)` y **después**
+   `auth.set_session(...)`. `set_session` emite `SIGNED_IN`, y
+   `_listen_to_auth_events` reacciona con `self._postgrest = None` para que se
+   reconstruya con el token nuevo. O sea: el cliente salía de la fábrica con su
+   `postgrest` en `None`, a la espera de la property perezosa.
+2. `/dashboard` dispara **ocho consultas en paralelo** con `asyncio.to_thread` sobre
+   ese mismo cliente. Los ocho hilos entran juntos al inicializador perezoso y al
+   dict de `options.headers`, sin ningún candado.
+3. La consulta que pierde la carrera falla **antes de salir a la red** —por eso en
+   los logs de Supabase `/rest/v1/documents` aparecía 93/93 en 200, sin un solo
+   error, pero con menos requests que sus compañeras de tanda (a las 11:00: profiles
+   66, findings 65, aircraft 58, sessions 56, **documents 52**).
+4. `return_exceptions=True` convertía la excepción en `[]`.
+5. `src/lib/pilot-status.ts` leía esa lista vacía como "el piloto no tiene CMA" y
+   lo afirmaba en el semáforo.
+
+**Una consulta que falla y una tabla vacía llegaban idénticas.** Ese es el bug de
+fondo; el resto es la carrera que lo disparaba.
+
+**Los tres arreglos:**
+
+- **Orden invertido en `get_user_scoped_client`.** `set_session` primero,
+  `postgrest.auth` último: el cliente sale construido y firmado, y no queda nada
+  perezoso para que ocho hilos se peleen.
+- **`auto_refresh_token=False` en `_options`.** El refresh token que le pasamos a
+  `set_session` es el literal `"recovery_refresh_token_placeholder"`, así que cada
+  refresco automático era un 400 garantizado — medido: 128 × 400 y 86 × **429** en 24 h
+  contra `/auth/v1/token`, o sea rate-limitándonos solos. Peor: al fallar, GoTrue
+  emite `SIGNED_OUT`, que descarta el `postgrest` y devuelve el `Authorization` a la
+  clave anónima. Si eso cae en medio de un request, las consultas que siguen salen
+  sin la identidad del piloto y RLS las deja en cero **con 200**. Un cliente por
+  request no tiene por qué refrescar nada.
+- **`/dashboard` devuelve `unavailable: [...]`** con los nombres de las secciones que
+  fallaron, y el log pasa a `Consolidated dashboard error [documents]: ...`. El
+  frontend ya no puede confundir "no hay" con "no pude preguntar".
+
+**Regla que queda:** una respuesta degradada nunca se devuelve indistinguible de una
+respuesta vacía legítima. Si una sección no se pudo leer, el payload lo dice.
