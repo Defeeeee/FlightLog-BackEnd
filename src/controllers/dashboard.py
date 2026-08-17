@@ -87,6 +87,54 @@ class DashboardController(Controller):
             return_exceptions=True,
         )
 
+        # ------------------------------------------------------------------
+        # Reintento secuencial de lo que falló en la tanda paralela.
+        # ------------------------------------------------------------------
+        #
+        # Las ocho consultas comparten **un solo cliente de supabase-py**, que no
+        # es un objeto sin estado ni está pensado para varios hilos. Ordenar la
+        # construcción del cliente (ver `get_user_scoped_client`) redujo mucho la
+        # carrera pero no la cerró: medido en los logs de Supabase el 2026-08-17,
+        # una request de `/dashboard` mandó **una sola de las ocho consultas** —
+        # las otras siete fallaron antes de salir a la red, así que no aparecen en
+        # los logs ni con error.
+        #
+        # Este reintento no arregla la causa, y no pretende: **la arregla del lado
+        # de la consecuencia**, que es lo que le llega al piloto. Corre lo que
+        # falló de a una y fuera de la concurrencia, que es justamente la
+        # condición que dispara el problema. Cuesta un viaje extra sólo cuando algo
+        # ya falló, o sea casi nunca.
+        #
+        # Lo que quede fallando después del reintento sí entra en `unavailable`, y
+        # ahí el frontend deja de afirmar cosas sobre el piloto.
+        reintentos = {
+            "profile": _profile, "aircraft": _aircraft, "flights": _flights,
+            "session": _session, "transactions": _transactions,
+            "audit": _findings, "documents": _documents,
+        }
+        respuestas = {
+            "profile": profile_resp, "aircraft": aircraft_resp, "flights": flights_resp,
+            "session": session_resp, "transactions": transactions_resp,
+            "audit": findings_resp, "documents": documents_resp,
+        }
+        for nombre, consulta in reintentos.items():
+            if not isinstance(respuestas[nombre], Exception):
+                continue
+            print(f"Consolidated dashboard error [{nombre}]: {respuestas[nombre]!r} — reintentando")
+            try:
+                respuestas[nombre] = await asyncio.to_thread(consulta)
+            except Exception as exc:
+                print(f"Consolidated dashboard retry failed [{nombre}]: {exc!r}")
+                respuestas[nombre] = exc
+
+        profile_resp = respuestas["profile"]
+        aircraft_resp = respuestas["aircraft"]
+        flights_resp = respuestas["flights"]
+        session_resp = respuestas["session"]
+        transactions_resp = respuestas["transactions"]
+        findings_resp = respuestas["audit"]
+        documents_resp = respuestas["documents"]
+
         unavailable: list[str] = []
 
         def _rows(name: str, resp) -> list:
@@ -98,7 +146,7 @@ class DashboardController(Controller):
             de "no pudimos leer los documentos del piloto".
             """
             if isinstance(resp, Exception):
-                print(f"Consolidated dashboard error [{name}]: {resp!r}")
+                # Ya se logueó arriba, en el reintento. Acá sólo se anota.
                 unavailable.append(name)
                 return []
             return resp.data or []
