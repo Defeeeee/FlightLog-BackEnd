@@ -382,16 +382,41 @@ el problema. Cuesta un viaje extra sólo cuando algo ya falló.
 
 Confirmado por Federico después del despliegue: el dashboard anda.
 
-**Lo que sigue abierto y cómo cerrarlo.** La causa raíz exacta —qué excepción tiran
-esos hilos— sólo vive en el log de pm2 del VPS, al que un agente no llega. Está
-instrumentado: cada fallo imprime `Consolidated dashboard error [seccion]: <repr> —
-reintentando`. **Quien tenga acceso al VPS: `pm2 logs flightlog-7477 --lines 200 |
-grep "Consolidated dashboard"`.** Con esa excepción se arregla de raíz; sin ella, el
-reintento alcanza y el piloto no ve el problema.
+### Cierre de la investigación — la hipótesis de la carrera era falsa
 
-La solución estructural, si alguna vez se quiere pagar: **un cliente por hilo**. Hoy
-no vale la pena — `get_user_scoped_client` hace un round-trip a `/auth/v1/user` por
-cliente, así que ocho clientes serían ocho round-trips por request.
+Todo lo de arriba culpa a una **carrera entre hilos sobre el cliente compartido**.
+Se puso a prueba y **no se sostiene**. El experimento, con `supabase` instalado en un
+venv y pegando contra el proyecto real:
+
+| Variante | Qué simula | Resultado |
+|---|---|---|
+| A — `postgrest` ya materializado | producción después del reorden | **0 fallos de 320** |
+| B — `client._postgrest = None` antes de los hilos | producción **antes** del reorden | **0 fallos de 320** |
+
+640 consultas concurrentes, ocho a la vez sobre un mismo cliente, cero excepciones.
+Si la carrera del inicializador perezoso fuera el mecanismo, la variante B tendría
+que haber fallado. No falló. **La explicación que esta bitácora daba por buena era
+una conjetura que nadie había ejercitado.**
+
+Lo que sí sostiene la evidencia: el fallo del 22:29:42 ocurrió **dos segundos después
+de que terminara un deploy**, o sea en el arranque en frío —`pip install` recién
+corrido, `pm2 restart`, uvicorn levantando—, y las consultas **no llegaron a la red**.
+Eso es un fallo de conexión o una cancelación del handler durante el arranque, no una
+corrupción de estado compartido. Es exactamente la clase de fallo transitorio que un
+reintento arregla.
+
+**Verificado en producción.** Desde que salió el reintento, agrupando los logs de
+Supabase en ventanas de 5 s: unas 130 requests de dashboard, con un pico de 7 en una
+sola ventana, y **ninguna tanda incompleta**. Ni una.
+
+**Caso cerrado.** No hace falta el log del VPS y no queda nada por mirar. Si algún día
+vuelve a aparecer una tanda incompleta, la instrumentación ya está puesta —cada fallo
+imprime `Consolidated dashboard error [seccion]: <repr> — reintentando`— y ahí sí
+`pm2 logs flightlog-7477 | grep "Consolidated dashboard"` da la excepción exacta.
+
+**Lección:** una explicación que encaja con los datos no es una explicación
+verificada. Esta encajaba con todo —los 200 sin filas, el conteo desparejo, la
+intermitencia— y era falsa. Reproducirla costó veinte minutos y un venv.
 
 ---
 
@@ -501,3 +526,24 @@ magnitud expresado en cada una.
 meses, acepta 200 días, acepta volver a `'fijo'`, rechaza una regla inventada—, todo
 con rollback y sin escribir nada. Las 7 filas siguen en `('fijo','dias')`.
 `python3 test_audit_engine.py` en verde con seis checks nuevos.
+
+
+---
+
+## `H1.1` paso 3: fuera el query string de WhatsApp — 2026-08-17
+
+Lo último que quedaba diferido de la migración a cabeceras. `/whatsapp/user-data`,
+`GET /whatsapp/chat-history` y `POST /whatsapp/chat-history` dejan de aceptar `phone`
+y `secret` por query string: `_secret_from` y `_phone_from` leen **sólo** cabeceras.
+
+**Por qué importa y no es cosmético:** el access log de uvicorn escribe la URL
+entera. Mientras el fallback existiera, un secreto compartido y el teléfono de un
+piloto podían volver a terminar en disco en cada request — que es literalmente lo que
+la migración a cabeceras vino a evitar, comprobado el 2026-08-06.
+
+**Evidencia de que no rompe a nadie:** el único llamador en los dos repos es
+`src/app/api/webhooks/whatsapp/route.ts`, que manda todo por `vectorHeaders()`.
+Verificado por grep antes de tocar nada.
+
+**Verificación:** `import src.app` OK, `ruff` OK, `test_audit_engine.py` OK, los tres
+en el venv local.

@@ -35,11 +35,22 @@ class WhatsAppController(Controller):
     SECRET_HEADER = "x-vector-secret"
     PHONE_HEADER = "x-vector-phone"
 
-    def _secret_from(self, request: Request, secret: str | None) -> str:
-        return request.headers.get(self.SECRET_HEADER) or (secret or "")
+    def _secret_from(self, request: Request) -> str:
+        """
+        El secreto, **sólo** por cabecera.
 
-    def _phone_from(self, request: Request, phone: str | None) -> str:
-        return request.headers.get(self.PHONE_HEADER) or (phone or "")
+        Hasta el 2026-08-17 esto caía al parámetro `secret` de la query string, para
+        no romper llamadas viejas mientras el frontend migraba. Esa migración
+        terminó —el único llamador de los dos repos manda todo por cabeceras, en
+        `src/app/api/webhooks/whatsapp/route.ts`— así que el fallback se va: mientras
+        exista, un secreto compartido puede volver a terminar escrito en el access
+        log de uvicorn, que es exactamente lo que este cambio vino a evitar.
+        """
+        return request.headers.get(self.SECRET_HEADER) or ""
+
+    def _phone_from(self, request: Request) -> str:
+        """El teléfono, sólo por cabecera. Mismo motivo que `_secret_from`."""
+        return request.headers.get(self.PHONE_HEADER) or ""
 
     def _verify_secret(self, secret: str) -> None:
         """Guard for the WhatsApp endpoints, which read user data with the service
@@ -59,14 +70,14 @@ class WhatsAppController(Controller):
             raise NotAuthorizedException("Invalid secret token.")
 
     @get("/user-data")
-    async def get_user_data_by_phone(self, request: Request, phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
+    async def get_user_data_by_phone(self, request: Request) -> Dict[str, Any]:
         """Fetch dashboard context for a user by their WhatsApp phone number."""
-        self._verify_secret(self._secret_from(request, secret))
+        self._verify_secret(self._secret_from(request))
 
         service_client = SupabaseManager.get_service_client()
         
         # Normalize phone (digits only)
-        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
+        clean_phone = "".join(c for c in self._phone_from(request) if c.isdigit())
         if not clean_phone:
             raise NotFoundException("Número de teléfono inválido")
 
@@ -166,12 +177,12 @@ class WhatsAppController(Controller):
         }
 
     @get("/chat-history")
-    async def get_chat_history(self, request: Request, phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
+    async def get_chat_history(self, request: Request) -> Dict[str, Any]:
         """Fetch chat history for a WhatsApp phone number."""
-        self._verify_secret(self._secret_from(request, secret))
+        self._verify_secret(self._secret_from(request))
         
         service_client = SupabaseManager.get_service_client()
-        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
+        clean_phone = "".join(c for c in self._phone_from(request) if c.isdigit())
         
         resp = service_client.table("whatsapp_chats").select("history").eq("phone", clean_phone).execute()
         if not resp.data:
@@ -179,12 +190,12 @@ class WhatsAppController(Controller):
         return {"history": resp.data[0]["history"]}
 
     @post("/chat-history")
-    async def update_chat_history(self, request: Request, data: Dict[str, Any], phone: str | None = None, secret: str | None = None) -> Dict[str, Any]:
+    async def update_chat_history(self, request: Request, data: Dict[str, Any]) -> Dict[str, Any]:
         """Update chat history for a WhatsApp phone number."""
-        self._verify_secret(self._secret_from(request, secret))
+        self._verify_secret(self._secret_from(request))
         
         service_client = SupabaseManager.get_service_client()
-        clean_phone = "".join(c for c in self._phone_from(request, phone) if c.isdigit())
+        clean_phone = "".join(c for c in self._phone_from(request) if c.isdigit())
         history = data.get("history", [])
         
         # Limit history to last 20 messages to keep context efficient
