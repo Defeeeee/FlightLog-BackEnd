@@ -137,8 +137,8 @@ Descartado con evidencia, para que no se vuelva a levantar: compartir una única
 instancia de `ClientOptions` **es seguro** en 2.28.3, porque el cliente hace
 `copy.copy(options)` y se arma su propio dict de headers.
 
-**Estado:** Terminado y desplegado. Falta la comprobación de que el bug murió, que
-requiere esperar (ver abajo).
+**Estado:** Terminado, desplegado y **cerrado el 2026-08-17**. La comprobación que
+faltaba está más abajo, cumplida.
 
 **Verificación:** Contra el SDK que reemplaza — mismo endpoint `/auth/v1/user`,
 mismas cabeceras, y `parse_user_response` parsea el body como usuario, o sea que
@@ -147,12 +147,20 @@ JWT mal firmado devuelven `None`, que el guard traduce al mismo 401 de antes.
 
 El camino de éxito no se pudo ejercitar desde el contenedor por falta de sesión; lo
 cubre el smoke autenticado del frontend, que entra con cuenta real y pega a diez
-rutas del dashboard, todas por este guard.
+rutas del dashboard, todas por este guard. **Cerrado el 2026-08-17:** el smoke
+autenticado corrió en verde en el CI, y el tráfico real de producción pasa por este
+guard todos los días.
 
 > **La prueba que de verdad cierra el caso:** loguearse, **esperar más de una hora
 > sin reiniciar**, y pegarle a `/health`. Antes de este cambio eso devolvía 500. Es
 > la única que distingue "arreglado" de "recién reiniciado", y es exactamente la
 > que faltó el 2026-08-04.
+>
+> **Cumplida el 2026-08-17.** El proceso corrió del 2026-08-14 12:04 al 2026-08-17
+> 22:27 —tres días y medio— con logins de por medio, y `/health` devuelve 200. La
+> evidencia dura: **cero respuestas no-2xx en los logs de Supabase en 24 h**, o sea
+> ni un `PGRST303 JWT expired`. Con el bug vivo, la primera hora después de un login
+> las hubiera. **Caso cerrado.**
 
 ### 2026-08-12 15:50 UTC — Claude (Opus 5, vía Claude Code) — El cliente de service role consultaba como usuario, y el barrido no se quejaba
 
@@ -290,9 +298,9 @@ y el tercero es el que casi nadie ve:
 muestra qué lo decide `src/lib/planned-flights.ts` en el frontend, que es puro y
 testeado. Filtrar acá partiría esa lógica en dos lugares.
 
-**Estado:** Terminado y pusheado. **La migración no está aplicada** — es aditiva, y
-el frontend degrada a lista vacía si el endpoint no existe, así que el orden de los
-dos deploys no importa.
+**Estado:** Terminado, desplegado y verificado. **Migración 009 aplicada** —
+comprobado contra la base el 2026-08-17: la tabla existe, con sus **cuatro políticas
+de RLS** y las dos columnas de horarios de la 010.
 
 **Verificación:** sólo `python3 -m py_compile` sobre los tres archivos. **`litestar`
 no está instalado en el entorno del agente** y `pip install -r requirements.txt`
@@ -348,6 +356,42 @@ fondo; el resto es la carrera que lo disparaba.
 
 **Regla que queda:** una respuesta degradada nunca se devuelve indistinguible de una
 respuesta vacía legítima. Si una sección no se pudo leer, el payload lo dice.
+
+### Actualización del mismo 2026-08-17 — la carrera no estaba cerrada
+
+Lo de arriba decía que el reorden de `get_user_scoped_client` arreglaba la carrera.
+**La redujo mucho y no la cerró.** Horas después, con todo desplegado, Federico
+mandó una captura del dashboard marcándole tres de los cuatro "primeros pasos" sin
+hacer, teniendo `license_type = PPA`, 6 aeronaves y 41 vuelos cargados.
+
+La evidencia, agrupando los logs de Supabase por ventanas de 3 segundos:
+
+| ventana | profiles | aircraft | flights | documents | sessions |
+|---|---|---|---|---|---|
+| 22:32:27 | 1 | 1 | 3 | 2 | 1 |
+| **22:29:42** | **0** | **0** | **0** | **0** | **1** |
+
+Esa request de `/dashboard` mandó **una sola de sus ocho consultas**. Las otras siete
+fallaron antes de salir a la red, así que no figuran ni con error.
+
+**El arreglo es un reintento secuencial**, y hay que ser claro sobre qué es: no
+arregla la causa —las ocho siguen compartiendo un cliente de `supabase-py` que no
+está pensado para varios hilos—, arregla la consecuencia. Lo que falla se reintenta
+**de a una y fuera de la concurrencia**, que es exactamente la condición que dispara
+el problema. Cuesta un viaje extra sólo cuando algo ya falló.
+
+Confirmado por Federico después del despliegue: el dashboard anda.
+
+**Lo que sigue abierto y cómo cerrarlo.** La causa raíz exacta —qué excepción tiran
+esos hilos— sólo vive en el log de pm2 del VPS, al que un agente no llega. Está
+instrumentado: cada fallo imprime `Consolidated dashboard error [seccion]: <repr> —
+reintentando`. **Quien tenga acceso al VPS: `pm2 logs flightlog-7477 --lines 200 |
+grep "Consolidated dashboard"`.** Con esa excepción se arregla de raíz; sin ella, el
+reintento alcanza y el piloto no ve el problema.
+
+La solución estructural, si alguna vez se quiere pagar: **un cliente por hilo**. Hoy
+no vale la pena — `get_user_scoped_client` hace un round-trip a `/auth/v1/user` por
+cliente, así que ocho clientes serían ocho round-trips por request.
 
 ---
 
@@ -409,7 +453,10 @@ tiene dos. Vale para la próxima: **una restricción no está verificada hasta q
 la vio rechazar algo.**
 
 **Verificación:** `python3 test_audit_engine.py` en verde, con cuatro checks nuevos
-sobre `derived_expiry`. El resto necesita base y no corrió acá.
+sobre `derived_expiry`. **Completada el 2026-08-17:** migraciones 011 y 012 aplicadas
+y verificadas contra la base —las cuatro columnas existen y el CHECK rechaza lo que
+tiene que rechazar—, y el CI del backend (import, ruff, motor de auditoría) corrió en
+verde tanto en un venv local como en GitHub Actions.
 
 ---
 
