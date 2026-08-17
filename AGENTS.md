@@ -390,11 +390,23 @@ de una violación de restricción, y hace además lo que el CHECK no puede: con 
 regla derivada **descarta la `expiry_date` que haya mandado el formulario**, para que
 esa columna no tenga dos escritores.
 
-**Estado:** código pusheado. **La migración 011 NO está aplicada.** Es aditiva —dos
-columnas con default, toda fila existente queda en `'fijo'`, que es literalmente lo
-que ya son—, así que el orden de migración y deploy no importa. Sin ella, el backend
-manda `expiry_rule` en el insert y Postgres rechaza la columna desconocida: aplicarla
-**antes** del deploy del backend.
+**Estado:** código pusheado, migraciones 011 y 012 **aplicadas y verificadas**. Las
+7 filas existentes quedaron en `'fijo'` con el offset en NULL.
+
+**La 011 salió con un CHECK que no rechazaba nada, y la 012 lo arregla.** La
+restricción era `(regla='fijo' and offset is null) or (regla='ultimo_vuelo' and
+offset between 1 and 3650)`, y con la regla derivada y el offset en NULL eso da
+`false or NULL` → **NULL**. Un CHECK que evalúa a NULL **pasa**: el estándar sólo
+rechaza con FALSE explícito, porque NULL es "no sé" y no "no". O sea que la fila
+incoherente que la restricción decía impedir entraba sin chistar.
+
+Lo agarró la propia sección de verificación de la 011, que intenta el update que
+tiene que fallar. **Sin correr esa prueba, la restricción hubiera parecido puesta
+durante meses.** La 012 la reescribe con un `case`, que nunca devuelve NULL.
+
+Es la trampa clásica de las restricciones sobre columnas anulables, y esta tabla
+tiene dos. Vale para la próxima: **una restricción no está verificada hasta que se
+la vio rechazar algo.**
 
 **Verificación:** `python3 test_audit_engine.py` en verde, con cuatro checks nuevos
 sobre `derived_expiry`. El resto necesita base y no corrió acá.
