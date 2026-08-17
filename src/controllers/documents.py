@@ -11,8 +11,9 @@ from src.auth.guards import auth_guard
 from src.config import settings
 from src.models.document import (
     DOCUMENT_KINDS,
+    EXPIRY_OFFSET_UNITS,
     EXPIRY_RULES,
-    MAX_EXPIRY_OFFSET_DAYS,
+    MAX_EXPIRY_OFFSET,
     Document,
     DocumentCreate,
     DocumentUpdate,
@@ -46,8 +47,8 @@ class DocumentsController(Controller):
         """
         Deja `payload` coherente entre la regla, el offset y la fecha. Muta en sitio.
 
-        Espeja el CHECK de la migración 011 para que un formulario mal armado dé un
-        400 con texto en vez de una violación de restricción de Postgres, y hace
+        Espeja el CHECK de las migraciones 011 y 013 para que un formulario mal armado
+        dé un 400 con texto en vez de una violación de restricción de Postgres, y hace
         además lo que el CHECK no puede: con una regla derivada **borra la fecha que
         haya llegado**. Esa columna pasa a tener un solo escritor —el recálculo— y
         dejar entrar la que mandó el formulario es abrir un segundo.
@@ -61,18 +62,36 @@ class DocumentsController(Controller):
 
         payload["expiry_rule"] = rule
 
+        unit = payload.get("expiry_offset_unit") or "dias"
+        if unit not in EXPIRY_OFFSET_UNITS:
+            raise ValidationException(
+                f"expiry_offset_unit must be one of {', '.join(EXPIRY_OFFSET_UNITS)}"
+            )
+        payload["expiry_offset_unit"] = unit
+
         if rule == "fijo":
-            # Un offset sobre una regla fija es un número que nadie lee, y el CHECK
-            # lo rechaza. Volver a 'fijo' tiene que limpiarlo.
+            # Un offset y un ancla sobre una regla fija son datos que nadie lee, y el
+            # CHECK los rechaza. Volver a 'fijo' tiene que limpiar los dos.
             payload["expiry_offset_days"] = None
+            payload["expiry_anchor_flight_id"] = None
             return
 
+        tope = MAX_EXPIRY_OFFSET[unit]
         offset = payload.get("expiry_offset_days")
-        if not isinstance(offset, int) or not 1 <= offset <= MAX_EXPIRY_OFFSET_DAYS:
+        if not isinstance(offset, int) or not 1 <= offset <= tope:
             raise ValidationException(
-                f"expiry_offset_days must be between 1 and {MAX_EXPIRY_OFFSET_DAYS} "
-                "when expiry_rule is 'ultimo_vuelo'"
+                f"expiry_offset_days must be between 1 and {tope} when the unit is '{unit}'"
             )
+
+        if rule == "vuelo_ancla":
+            if not payload.get("expiry_anchor_flight_id"):
+                raise ValidationException(
+                    "expiry_anchor_flight_id is required when expiry_rule is 'vuelo_ancla'"
+                )
+        else:
+            # `'ultimo_vuelo'` elige el ancla sola. Un id acá sería un dato que el
+            # recálculo ignora y que después confunde a quien lea la fila.
+            payload["expiry_anchor_flight_id"] = None
 
         payload["expiry_date"] = None
 

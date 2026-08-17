@@ -216,6 +216,43 @@ def main() -> bool:
         derived_expiries.derived_expiry(date(2023, 12, 20), 90) == date(2024, 3, 19),
     )
 
+    # Meses, que no son 30 días. El repaso de 61.135 son 24 meses calendario y
+    # resolverlo con 730 días se corre uno o dos según los bisiestos: en un
+    # vencimiento regulatorio, esos dos días son poder volar o no.
+    ok &= check(
+        "24 meses caen el mismo día, dos años después",
+        derived_expiries.sumar_offset(date(2026, 3, 15), 24, "meses") == date(2028, 3, 15),
+    )
+
+    # El caso que rompe una implementación ingenua: no existe el 31 de febrero.
+    ok &= check(
+        "sumar meses satura al último día del mes destino",
+        derived_expiries.sumar_offset(date(2026, 1, 31), 1, "meses") == date(2026, 2, 28),
+    )
+
+    ok &= check(
+        "un 29 de febrero cae en el 28 del año no bisiesto",
+        derived_expiries.sumar_offset(date(2024, 2, 29), 12, "meses") == date(2025, 2, 28),
+    )
+
+    # El módulo tiene que cruzar diciembre sin dar mes 13 ni mes 0.
+    ok &= check(
+        "sumar meses cruza el fin de año",
+        derived_expiries.sumar_offset(date(2026, 12, 15), 1, "meses") == date(2027, 1, 15),
+    )
+
+    ok &= check(
+        "el vencimiento anclado usa la unidad que le pasan",
+        derived_expiries.derived_expiry(date(2026, 3, 15), 24, "meses") == date(2028, 3, 15),
+    )
+
+    # Sin unidad explícita se cuenta en días: es el default de la columna y lo que
+    # eran todas las filas antes de la migración 013.
+    ok &= check(
+        "sin unidad, cuenta en días",
+        derived_expiries.derived_expiry(date(2026, 8, 1), 60) == date(2026, 9, 30),
+    )
+
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))
     return bool(ok)
 

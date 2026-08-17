@@ -410,3 +410,47 @@ la vio rechazar algo.**
 
 **Verificación:** `python3 test_audit_engine.py` en verde, con cuatro checks nuevos
 sobre `derived_expiry`. El resto necesita base y no corrió acá.
+
+---
+
+## Anclar el vencimiento a un vuelo puntual — 2026-08-14
+
+Pedido de Federico, después de preguntar si se podía contar desde un vuelo que no
+fuera el último: **sí, y que se pueda cambiar después**. Tercera regla,
+`'vuelo_ancla'`, más la unidad.
+
+**Una regla anclada no es un vencimiento variable, y hay que decirlo.** Si el ancla
+es un vuelo fijo, la fecha no se mueve, así que esto es *casi* lo mismo que escribir
+la fecha a mano. Las dos diferencias que lo justifican:
+
+1. Si se corrige la fecha de ese vuelo, el vencimiento se corrige solo. Escrito a
+   mano quedaría apuntando al día viejo, en silencio.
+2. Queda registrado **de dónde salió la fecha**. Un `expiry_date` suelto es un número
+   sin origen; con el ancla, la pantalla dice "24 meses desde tu vuelo del 2026-03-15".
+
+**Sin foreign key contra `flights`, y no es un olvido.** Las tres variantes y por qué
+ninguna sirve: `on delete restrict` haría que **borrar un vuelo falle** porque un
+documento lo señala —el libro de vuelo no puede quedar de rehén de un documento—;
+`on delete set null` evapora el vencimiento y un documento que bloqueaba el vuelo
+deja de bloquear **en silencio**, que es la clase de cosa que este proyecto ya pagó
+caro; `cascade` borraría el documento. En cambio `recompute_for_user` **congela**: si
+el vuelo ancla ya no existe, el documento se queda con la última fecha calculada y
+pasa a `'fijo'`. La intención sobrevive y el piloto puede re-apuntarlo.
+
+**Meses además de días, y no es adorno.** El repaso de 61.135 son 24 **meses
+calendario**; con 730 días la fecha se corre uno o dos según los bisiestos, y en un
+vencimiento regulatorio esos dos días son poder volar o no. `sumar_offset` satura al
+último día del mes destino (31 de enero + 1 mes = 28 de febrero), a mano porque
+`dateutil` no está en los requirements. **Está duplicada en
+`src/lib/expiry-rules.ts`**: el formulario previsualiza la fecha antes de guardar, y
+si las dos se separan muestra una cosa y guarda otra. Los tests de los dos lados
+comparten los mismos cuatro casos a propósito.
+
+Los topes son por unidad —3650 días, 120 meses— porque son el mismo orden de
+magnitud expresado en cada una.
+
+**Estado:** migración 013 aplicada y verificada contra los siete casos del CHECK
+—rechaza `vuelo_ancla` sin ancla, rechaza un ancla en `ultimo_vuelo`, rechaza 200
+meses, acepta 200 días, acepta volver a `'fijo'`, rechaza una regla inventada—, todo
+con rollback y sin escribir nada. Las 7 filas siguen en `('fijo','dias')`.
+`python3 test_audit_engine.py` en verde con seis checks nuevos.

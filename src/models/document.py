@@ -30,16 +30,34 @@ BLOCKING_LEVELS = ("nada", "pasajeros", "solo", "vuelo")
 
 #: Quién escribe `documents.expiry_date`. Mirrors the CHECK on documents.expiry_rule.
 #:
-#: 'fijo' es lo de siempre: el piloto escribe la fecha. 'ultimo_vuelo' la calcula el
-#: backend sumando `expiry_offset_days` a la fecha del vuelo más reciente, y la
-#: recalcula cada vez que los vuelos del piloto cambian — que es lo que hace que un
-#: requisito del tipo "60 días sin volar y necesitás adaptación" deje de estar mal
-#: al día siguiente de escribirlo. Ver `src/services/derived_expiries.py`.
-EXPIRY_RULES = ("fijo", "ultimo_vuelo")
+#: 'fijo' es lo de siempre: el piloto escribe la fecha. Las otras dos las calcula el
+#: backend sumando `expiry_offset_days` (en `expiry_offset_unit`) a la fecha de un
+#: vuelo, y las recalcula cada vez que los vuelos del piloto cambian:
+#:
+#:   - 'ultimo_vuelo' cuenta desde el vuelo más reciente, así que la fecha se corre
+#:     con cada vuelo nuevo. Es "60 días sin volar y necesitás adaptación", el
+#:     requisito que escrito a mano está mal al día siguiente.
+#:   - 'vuelo_ancla' cuenta desde el vuelo que señala `expiry_anchor_flight_id`. La
+#:     fecha no se mueve salvo que se corrija la de ese vuelo. Es "24 meses desde
+#:     aquel repaso", y lo que gana sobre escribir la fecha a mano es que queda
+#:     registrado de dónde salió y que sigue las correcciones del vuelo.
+#:
+#: Ver `src/services/derived_expiries.py`.
+EXPIRY_RULES = ("fijo", "ultimo_vuelo", "vuelo_ancla")
 
-#: Tope del offset, espejo del CHECK. No es regulatorio: es un guardarraíl contra un
-#: dedo de más en el formulario.
-MAX_EXPIRY_OFFSET_DAYS = 3650
+#: Reglas cuya fecha escribe el backend. `'fijo'` es la única que escribe el piloto.
+DERIVED_EXPIRY_RULES = ("ultimo_vuelo", "vuelo_ancla")
+
+#: En qué unidad se cuenta `expiry_offset_days`. Los meses saturan al último día del
+#: mes destino — ver `derived_expiries.sumar_offset`.
+EXPIRY_OFFSET_UNITS = ("dias", "meses")
+
+#: Topes del offset por unidad, espejo del CHECK. No son regulatorios: son
+#: guardarraíles contra un dedo de más en el formulario, los dos del orden de 10 años.
+MAX_EXPIRY_OFFSET = {"dias": 3650, "meses": 120}
+
+#: Compatibilidad: quedó de cuando la unidad no existía.
+MAX_EXPIRY_OFFSET_DAYS = MAX_EXPIRY_OFFSET["dias"]
 
 
 
@@ -56,6 +74,10 @@ class Document(BaseModel):
     # backend: la fuente es esta regla más el offset. Ver EXPIRY_RULES.
     expiry_rule: str = "fijo"
     expiry_offset_days: Optional[int] = None
+    expiry_offset_unit: str = "dias"
+    #: Vuelo desde el que se cuenta, con `expiry_rule = 'vuelo_ancla'`. Referencia
+    #: blanda: sin FK, para que borrar un vuelo nunca falle. Ver migración 013.
+    expiry_anchor_flight_id: Optional[UUID] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
@@ -74,6 +96,10 @@ class DocumentCreate(BaseModel):
     expiry_date: Optional[date] = None
     expiry_rule: str = "fijo"
     expiry_offset_days: Optional[int] = None
+    expiry_offset_unit: str = "dias"
+    #: Vuelo desde el que se cuenta, con `expiry_rule = 'vuelo_ancla'`. Referencia
+    #: blanda: sin FK, para que borrar un vuelo nunca falle. Ver migración 013.
+    expiry_anchor_flight_id: Optional[UUID] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: List[int] = Field(default_factory=lambda: [60, 30, 7])
@@ -86,6 +112,8 @@ class DocumentUpdate(BaseModel):
     expiry_date: Optional[date] = None
     expiry_rule: Optional[str] = None
     expiry_offset_days: Optional[int] = None
+    expiry_offset_unit: Optional[str] = None
+    expiry_anchor_flight_id: Optional[UUID] = None
     issued_date: Optional[date] = None
     notes: Optional[str] = None
     alert_days: Optional[List[int]] = None
