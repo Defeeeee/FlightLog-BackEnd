@@ -299,3 +299,158 @@ no está instalado en el entorno del agente** y `pip install -r requirements.txt
 falla por un `PyJWT` que instaló Debian sin `RECORD`, así que el
 `python -c "import src.app"` lo corre el CI y no yo. **Mirar ese job en verde antes
 de mergear:** un import mal escrito en `src/app.py` tira el proceso al arrancar.
+
+---
+
+## "No tenés CMA" a un piloto que sí lo tiene — 2026-08-14
+
+**Síntoma reportado:** «hay veces que me logueo y me dice que no tengo CMA hasta que
+voy hasta el hangar», con el CMA efectivamente cargado. Intermitente, y se arreglaba
+solo al pasar por otra pantalla.
+
+**La cadena, de abajo hacia arriba:**
+
+1. `get_user_scoped_client` hacía `postgrest.auth(token)` y **después**
+   `auth.set_session(...)`. `set_session` emite `SIGNED_IN`, y
+   `_listen_to_auth_events` reacciona con `self._postgrest = None` para que se
+   reconstruya con el token nuevo. O sea: el cliente salía de la fábrica con su
+   `postgrest` en `None`, a la espera de la property perezosa.
+2. `/dashboard` dispara **ocho consultas en paralelo** con `asyncio.to_thread` sobre
+   ese mismo cliente. Los ocho hilos entran juntos al inicializador perezoso y al
+   dict de `options.headers`, sin ningún candado.
+3. La consulta que pierde la carrera falla **antes de salir a la red** —por eso en
+   los logs de Supabase `/rest/v1/documents` aparecía 93/93 en 200, sin un solo
+   error, pero con menos requests que sus compañeras de tanda (a las 11:00: profiles
+   66, findings 65, aircraft 58, sessions 56, **documents 52**).
+4. `return_exceptions=True` convertía la excepción en `[]`.
+5. `src/lib/pilot-status.ts` leía esa lista vacía como "el piloto no tiene CMA" y
+   lo afirmaba en el semáforo.
+
+**Una consulta que falla y una tabla vacía llegaban idénticas.** Ese es el bug de
+fondo; el resto es la carrera que lo disparaba.
+
+**Los tres arreglos:**
+
+- **Orden invertido en `get_user_scoped_client`.** `set_session` primero,
+  `postgrest.auth` último: el cliente sale construido y firmado, y no queda nada
+  perezoso para que ocho hilos se peleen.
+- **`auto_refresh_token=False` en `_options`.** El refresh token que le pasamos a
+  `set_session` es el literal `"recovery_refresh_token_placeholder"`, así que cada
+  refresco automático era un 400 garantizado — medido: 128 × 400 y 86 × **429** en 24 h
+  contra `/auth/v1/token`, o sea rate-limitándonos solos. Peor: al fallar, GoTrue
+  emite `SIGNED_OUT`, que descarta el `postgrest` y devuelve el `Authorization` a la
+  clave anónima. Si eso cae en medio de un request, las consultas que siguen salen
+  sin la identidad del piloto y RLS las deja en cero **con 200**. Un cliente por
+  request no tiene por qué refrescar nada.
+- **`/dashboard` devuelve `unavailable: [...]`** con los nombres de las secciones que
+  fallaron, y el log pasa a `Consolidated dashboard error [documents]: ...`. El
+  frontend ya no puede confundir "no hay" con "no pude preguntar".
+
+**Regla que queda:** una respuesta degradada nunca se devuelve indistinguible de una
+respuesta vacía legítima. Si una sección no se pudo leer, el payload lo dice.
+
+---
+
+## Vencimientos que se mueven solos — 2026-08-14
+
+Pedido de Federico: «que se puedan setear vencimientos variables, por ejemplo en base
+a la fecha del último vuelo, que se actualiza constantemente».
+
+`documents.expiry_rule` con dos valores. `'fijo'` es todo lo que había: el piloto
+escribe la fecha. `'ultimo_vuelo'` la calcula el backend sumando
+`expiry_offset_days` a la fecha del vuelo más reciente.
+
+**`expiry_date` no cambia de significado**, y esa es la decisión de diseño. Sigue
+siendo la fecha de vencimiento para el semáforo, para `documentStatus`, para el orden
+de `GET /documents` y para el barrido de avisos. Lo único que cambia es quién la
+escribe. Nada del resto del sistema se entera de que existen reglas.
+
+**Se guarda calculada, no se deriva al leer.** El barrido de vencimientos corre de
+noche sobre `documents` de todos los pilotos filtrando por `expiry_date`; derivarla
+en cada lectura lo obligaría a traerse los vuelos de cada uno para resolver una
+fecha. La caché tiene **un solo escritor**, `src/services/derived_expiries.py`, que
+corre desde tres lugares: alta, edición y baja de vuelo (el ancla se movió) y alta o
+edición del documento (la regla es nueva y la fecha todavía no existe).
+
+Cuatro cosas que no se deducen del código:
+
+- **`recompute_for_user_safe` nunca voltea la escritura que lo disparó**, igual que
+  `_refresh_audit`. El peor caso es una fecha de ayer; perder el vuelo que el piloto
+  acaba de cargar sería peor.
+- **Sólo escribe lo que cambió.** El trigger `documents_reset_alerts` borra la marca
+  del último aviso cuando `expiry_date` cambia, así que un update de más hace que el
+  piloto reciba dos veces el mismo aviso de 30 días por haber cargado un vuelo.
+- **Arranca por los documentos, no por los vuelos.** Casi nadie tiene reglas
+  cargadas, y para esos el recálculo cuesta una consulta que vuelve vacía.
+- **Sin vuelos, `expiry_date` queda en NULL**, que desde la 007 es "no vence". Es lo
+  correcto: una cuenta que arranca con el último vuelo, sin ningún vuelo, no arrancó.
+
+`_apply_expiry_rule` espeja el CHECK de la migración para dar un 400 con texto en vez
+de una violación de restricción, y hace además lo que el CHECK no puede: con una
+regla derivada **descarta la `expiry_date` que haya mandado el formulario**, para que
+esa columna no tenga dos escritores.
+
+**Estado:** código pusheado, migraciones 011 y 012 **aplicadas y verificadas**. Las
+7 filas existentes quedaron en `'fijo'` con el offset en NULL.
+
+**La 011 salió con un CHECK que no rechazaba nada, y la 012 lo arregla.** La
+restricción era `(regla='fijo' and offset is null) or (regla='ultimo_vuelo' and
+offset between 1 and 3650)`, y con la regla derivada y el offset en NULL eso da
+`false or NULL` → **NULL**. Un CHECK que evalúa a NULL **pasa**: el estándar sólo
+rechaza con FALSE explícito, porque NULL es "no sé" y no "no". O sea que la fila
+incoherente que la restricción decía impedir entraba sin chistar.
+
+Lo agarró la propia sección de verificación de la 011, que intenta el update que
+tiene que fallar. **Sin correr esa prueba, la restricción hubiera parecido puesta
+durante meses.** La 012 la reescribe con un `case`, que nunca devuelve NULL.
+
+Es la trampa clásica de las restricciones sobre columnas anulables, y esta tabla
+tiene dos. Vale para la próxima: **una restricción no está verificada hasta que se
+la vio rechazar algo.**
+
+**Verificación:** `python3 test_audit_engine.py` en verde, con cuatro checks nuevos
+sobre `derived_expiry`. El resto necesita base y no corrió acá.
+
+---
+
+## Anclar el vencimiento a un vuelo puntual — 2026-08-14
+
+Pedido de Federico, después de preguntar si se podía contar desde un vuelo que no
+fuera el último: **sí, y que se pueda cambiar después**. Tercera regla,
+`'vuelo_ancla'`, más la unidad.
+
+**Una regla anclada no es un vencimiento variable, y hay que decirlo.** Si el ancla
+es un vuelo fijo, la fecha no se mueve, así que esto es *casi* lo mismo que escribir
+la fecha a mano. Las dos diferencias que lo justifican:
+
+1. Si se corrige la fecha de ese vuelo, el vencimiento se corrige solo. Escrito a
+   mano quedaría apuntando al día viejo, en silencio.
+2. Queda registrado **de dónde salió la fecha**. Un `expiry_date` suelto es un número
+   sin origen; con el ancla, la pantalla dice "24 meses desde tu vuelo del 2026-03-15".
+
+**Sin foreign key contra `flights`, y no es un olvido.** Las tres variantes y por qué
+ninguna sirve: `on delete restrict` haría que **borrar un vuelo falle** porque un
+documento lo señala —el libro de vuelo no puede quedar de rehén de un documento—;
+`on delete set null` evapora el vencimiento y un documento que bloqueaba el vuelo
+deja de bloquear **en silencio**, que es la clase de cosa que este proyecto ya pagó
+caro; `cascade` borraría el documento. En cambio `recompute_for_user` **congela**: si
+el vuelo ancla ya no existe, el documento se queda con la última fecha calculada y
+pasa a `'fijo'`. La intención sobrevive y el piloto puede re-apuntarlo.
+
+**Meses además de días, y no es adorno.** El repaso de 61.135 son 24 **meses
+calendario**; con 730 días la fecha se corre uno o dos según los bisiestos, y en un
+vencimiento regulatorio esos dos días son poder volar o no. `sumar_offset` satura al
+último día del mes destino (31 de enero + 1 mes = 28 de febrero), a mano porque
+`dateutil` no está en los requirements. **Está duplicada en
+`src/lib/expiry-rules.ts`**: el formulario previsualiza la fecha antes de guardar, y
+si las dos se separan muestra una cosa y guarda otra. Los tests de los dos lados
+comparten los mismos cuatro casos a propósito.
+
+Los topes son por unidad —3650 días, 120 meses— porque son el mismo orden de
+magnitud expresado en cada una.
+
+**Estado:** migración 013 aplicada y verificada contra los siete casos del CHECK
+—rechaza `vuelo_ancla` sin ancla, rechaza un ancla en `ultimo_vuelo`, rechaza 200
+meses, acepta 200 días, acepta volver a `'fijo'`, rechaza una regla inventada—, todo
+con rollback y sin escribir nada. Las 7 filas siguen en `('fijo','dias')`.
+`python3 test_audit_engine.py` en verde con seis checks nuevos.

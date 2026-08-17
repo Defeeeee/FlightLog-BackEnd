@@ -9,6 +9,7 @@ with `python test_audit_engine.py`.
 from datetime import date
 
 from src.services import audit_engine as engine
+from src.services import derived_expiries
 from src.services import document_alerts
 
 
@@ -186,6 +187,70 @@ def main() -> bool:
     ok &= check(
         "al reintentar avisa el bucket de hoy, no el que falló",
         document_alerts.should_alert(doc_fallido_mas_cerca, today) == 30,
+    )
+
+    # Vencimientos derivados (migración 011). La aritmética es lo único de
+    # `derived_expiries` que no toca la base, y es lo que decide la fecha que
+    # después bloquea el semáforo y dispara los avisos.
+    ok &= check(
+        "el vencimiento derivado suma los días al último vuelo",
+        derived_expiries.derived_expiry(date(2026, 8, 1), 60) == date(2026, 9, 30),
+    )
+
+    # Sin vuelos no hay ancla: None significa "no vence" desde la migración 007,
+    # que es lo correcto para una cuenta que todavía no empezó a correr.
+    ok &= check(
+        "sin vuelos, el vencimiento derivado queda en None",
+        derived_expiries.derived_expiry(None, 60) is None,
+    )
+
+    ok &= check(
+        "sin offset no se inventa una fecha",
+        derived_expiries.derived_expiry(date(2026, 8, 1), None) is None,
+    )
+
+    # Cruzar el fin de mes y el año bisiesto: timedelta lo resuelve, pero es la
+    # clase de cuenta que se rompe si alguien la reescribe a mano con meses.
+    ok &= check(
+        "el offset cruza el fin de año",
+        derived_expiries.derived_expiry(date(2023, 12, 20), 90) == date(2024, 3, 19),
+    )
+
+    # Meses, que no son 30 días. El repaso de 61.135 son 24 meses calendario y
+    # resolverlo con 730 días se corre uno o dos según los bisiestos: en un
+    # vencimiento regulatorio, esos dos días son poder volar o no.
+    ok &= check(
+        "24 meses caen el mismo día, dos años después",
+        derived_expiries.sumar_offset(date(2026, 3, 15), 24, "meses") == date(2028, 3, 15),
+    )
+
+    # El caso que rompe una implementación ingenua: no existe el 31 de febrero.
+    ok &= check(
+        "sumar meses satura al último día del mes destino",
+        derived_expiries.sumar_offset(date(2026, 1, 31), 1, "meses") == date(2026, 2, 28),
+    )
+
+    ok &= check(
+        "un 29 de febrero cae en el 28 del año no bisiesto",
+        derived_expiries.sumar_offset(date(2024, 2, 29), 12, "meses") == date(2025, 2, 28),
+    )
+
+    # El módulo tiene que cruzar diciembre sin dar mes 13 ni mes 0.
+    ok &= check(
+        "sumar meses cruza el fin de año",
+        derived_expiries.sumar_offset(date(2026, 12, 15), 1, "meses") == date(2027, 1, 15),
+    )
+
+    ok &= check(
+        "el vencimiento anclado usa la unidad que le pasan",
+        derived_expiries.derived_expiry(date(2026, 3, 15), 24, "meses") == date(2028, 3, 15),
+    )
+
+    # Sin unidad explícita se cuenta en días: es el default de la columna y lo que
+    # eran todas las filas antes de la migración 013.
+    ok &= check(
+        "sin unidad, cuenta en días",
+        derived_expiries.derived_expiry(date(2026, 8, 1), 60) == date(2026, 9, 30),
     )
 
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))

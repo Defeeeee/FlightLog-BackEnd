@@ -5,7 +5,7 @@ from typing import List, Optional
 from uuid import UUID
 from src.models.flight import Flight, FlightCreate, FlightUpdate
 from src.auth.guards import auth_guard
-from src.services import audit_engine
+from src.services import audit_engine, derived_expiries
 
 class FlightsController(Controller):
     path = "/flights"
@@ -161,6 +161,8 @@ class FlightsController(Controller):
         )
 
         self._refresh_audit(str(flight_obj.user_id), supabase_client)
+        # El ancla de los vencimientos derivados se acaba de mover.
+        derived_expiries.recompute_for_user_safe(supabase_client, str(flight_obj.user_id))
 
         return flight_obj
 
@@ -188,6 +190,8 @@ class FlightsController(Controller):
         )
 
         self._refresh_audit(str(flight_obj.user_id), supabase_client)
+        # El ancla de los vencimientos derivados se acaba de mover.
+        derived_expiries.recompute_for_user_safe(supabase_client, str(flight_obj.user_id))
 
         return flight_obj
 
@@ -202,3 +206,6 @@ class FlightsController(Controller):
         # Deleting a flight can clear findings on *other* flights too — the
         # counterpart of an overlap, or the survivor of a duplicate pair.
         self._refresh_audit(user_id, supabase_client)
+        # Borrar el último vuelo mueve el ancla hacia atrás, no sólo hacia
+        # adelante: un vencimiento derivado puede pasar a estar vencido.
+        derived_expiries.recompute_for_user_safe(supabase_client, user_id)

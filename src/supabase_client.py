@@ -86,8 +86,31 @@ class SupabaseManager:
 
         `persist_session=False` para el cliente de service role: no representa a
         nadie y no tiene por qué guardar ni recuperar sesiones.
+
+        **`auto_refresh_token=False` en todos.** Guardar una sesión con
+        `set_session` arranca un timer de refresco que, cuando vence, hace
+        `POST /auth/v1/token?grant_type=refresh_token`. Acá el refresh token es el
+        literal `"recovery_refresh_token_placeholder"` —el backend nunca lo
+        recibe, sólo tiene el access token del bearer—, así que **cada intento es
+        un 400 garantizado**. Medido en los logs de Supabase en 24 h: 128 × 400 y
+        86 × 429 contra `/auth/v1/token`, o sea que además nos estábamos
+        rate-limitando solos.
+
+        Y el 400 no es sólo ruido: al fallar el refresco, GoTrue borra la sesión y
+        emite `SIGNED_OUT`, que `_listen_to_auth_events` traduce en descartar el
+        `postgrest` del cliente y devolver la cabecera `Authorization` a la clave
+        anónima. Si eso pasa mientras el request está en vuelo —el dashboard corre
+        ocho consultas en hilos sobre **el mismo cliente**— las que lleguen
+        después consultan sin la identidad del piloto. Ver `get_user_scoped_client`.
+
+        Un cliente por request no tiene ninguna razón para refrescar nada: vive
+        menos de lo que tarda un token en vencer.
         """
-        return ClientOptions(flow_type="implicit", persist_session=persist_session)
+        return ClientOptions(
+            flow_type="implicit",
+            persist_session=persist_session,
+            auto_refresh_token=False,
+        )
 
     @classmethod
     def get_base_client(cls) -> Client:
@@ -126,21 +149,44 @@ class SupabaseManager:
     @staticmethod
     def get_user_scoped_client(access_token: str) -> Client:
         """
-        Returns a Supabase client instance acting on behalf of a specific user.
+        Un cliente que consulta en nombre de un piloto.
+
+        **El orden de estas dos líneas importa y antes estaba al revés.**
+
+        `set_session` emite `SIGNED_IN`, y `_listen_to_auth_events` reacciona
+        haciendo `self._postgrest = None` para que se reconstruya con el token
+        nuevo (`supabase/_sync/client.py`, verificado en 2.28.3). Con
+        `postgrest.auth(...)` **antes**, el cliente salía de acá con su `postgrest`
+        recién descartado: no construido, sino `None`, esperando a que la property
+        perezosa lo rehiciera en el primer `.table(...)`.
+
+        Eso anduvo mientras cada controlador hacía una consulta por vez. Desde que
+        `/dashboard` dispara ocho en paralelo con `asyncio.to_thread`, **los ocho
+        hilos entran a la vez a ese inicializador perezoso sobre el mismo cliente**,
+        leyendo y escribiendo `_postgrest` y el dict de `options.headers` sin
+        ningún candado. Cuadra con lo que se ve en producción: consultas que ni
+        aparecen en los logs de Supabase —fallan antes de salir— y que
+        `return_exceptions=True` convierte en lista vacía. Es de dónde salía que
+        el dashboard dijera "no tenés CMA" a un piloto que sí lo tiene cargado.
+
+        Poniendo `set_session` primero, `postgrest.auth` es lo último que toca al
+        cliente y lo deja **construido y firmado**. Los hilos encuentran la
+        property ya resuelta y no hay inicialización que correr.
         """
         client = create_client(
             supabase_url=settings.supabase_url,
             supabase_key=settings.supabase_anon_key,
             options=SupabaseManager._options()
         )
-        
-        # 1. Set for Database operations (Postgrest/RLS)
-        client.postgrest.auth(access_token)
-        
-        # 2. Set for Auth operations (update_user, etc.)
-        # We set the session manually so the auth client knows who is performing the action
+
+        # 1. Para las operaciones de auth (update_user, get_user). Emite SIGNED_IN
+        #    y de paso descarta el postgrest del cliente, así que va primero.
         client.auth.set_session(access_token, "recovery_refresh_token_placeholder")
-        
+
+        # 2. Para la base (PostgREST/RLS). Materializa el postgrest y le pone el
+        #    token: al salir de acá no queda nada perezoso por construir.
+        client.postgrest.auth(access_token)
+
         return client
 
     @staticmethod
