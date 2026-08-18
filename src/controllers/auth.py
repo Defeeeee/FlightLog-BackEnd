@@ -2,7 +2,7 @@ from litestar import Controller, post, get, status_codes
 from litestar.exceptions import InternalServerException, NotAuthorizedException, TooManyRequestsException
 from supabase import Client
 from src.supabase_client import SupabaseManager
-from src.models.auth import UserRegister, UserLogin, AuthResponse, PasswordRecover, PasswordUpdate
+from src.models.auth import UserRegister, UserLogin, AuthResponse, PasswordRecover, PasswordUpdate, TokenRefresh
 
 class AuthController(Controller):
     path = "/auth"
@@ -123,3 +123,54 @@ class AuthController(Controller):
             if hasattr(e, 'message'):
                 error_msg = e.message
             raise NotAuthorizedException(f"Login failed: {error_msg}")
+
+    @post("/refresh")
+    async def refresh(self, supabase_client: Client, data: TokenRefresh) -> AuthResponse:
+        """
+        Canjea un refresh token por un par nuevo. **La sesión de Vector no se
+        renovaba nunca antes de esto.**
+
+        El `access_token` de Supabase vive una hora; la cookie `session_token` del
+        frontend vive veinticuatro. Entre la hora 1 y la 24 el proxy veía la cookie,
+        dejaba pasar, y **todas las páginas pedían con un JWT vencido** → 401 →
+        logout. O sea: la sesión no moría a las 24 h, moría a la hora, y encima de
+        una forma que parecía un bug de datos y no de sesión.
+
+        El `refresh_token` se venía guardando en una cookie de 30 días desde hace
+        meses **sin que existiera un solo pedazo de código —ni acá ni en el
+        frontend— que lo canjeara.** Este endpoint es esa mitad faltante; la otra
+        vive en `src/proxy.ts`, que es el único lugar de Next donde se puede
+        escribir una cookie.
+
+        Dos cosas que hay que tener presentes al tocar esto:
+
+        1. **Los refresh token son de un solo uso.** Cada canje devuelve uno nuevo e
+           invalida el anterior, así que el llamador tiene que guardar *los dos*
+           tokens que salen de acá. Guardar sólo el access token deja la sesión
+           muerta en la próxima renovación, que es peor que no renovar.
+        2. **GoTrue tolera reusar el mismo refresh token durante ~10 s** y en esa
+           ventana devuelve la misma sesión. Es lo que salva el caso de dos
+           navegaciones simultáneas con el token vencido: las dos canjean, las dos
+           reciben lo mismo. Fuera de esa ventana la segunda recibe 401, y el 401
+           acá significa "andá a login", no "reintentá".
+
+        Sin guard a propósito: quien llama acá **no tiene** un access token válido
+        —ése es justamente el motivo por el que llama—. La autorización es el
+        refresh token mismo, que Supabase valida.
+        """
+        try:
+            auth_response = supabase_client.auth.refresh_session(data.refresh_token)
+        except Exception as e:
+            # Refresh token vencido, ya usado o revocado. Es el camino esperado
+            # cuando alguien vuelve después de 30 días, no un error del servidor.
+            error_msg = getattr(e, "message", str(e))
+            raise NotAuthorizedException(detail=f"Refresh failed: {error_msg}")
+
+        if not auth_response.session or not auth_response.user:
+            raise NotAuthorizedException(detail="Refresh failed: no session returned")
+
+        return AuthResponse(
+            access_token=auth_response.session.access_token,
+            refresh_token=auth_response.session.refresh_token,
+            user_id=str(auth_response.user.id),
+        )

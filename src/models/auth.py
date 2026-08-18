@@ -15,6 +15,10 @@ class AuthResponse(BaseModel):
     refresh_token: str
     user_id: str
 
+class TokenRefresh(BaseModel):
+    refresh_token: str
+
+
 class PasswordRecover(BaseModel):
     email: EmailStr
 
