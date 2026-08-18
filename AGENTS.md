@@ -547,3 +547,39 @@ Verificado por grep antes de tocar nada.
 
 **Verificación:** `import src.app` OK, `ruff` OK, `test_audit_engine.py` OK, los tres
 en el venv local.
+
+---
+
+## Backfill de cobros: registrar el pasado sin tocar el saldo — 2026-08-17
+
+`_sync_flight_transaction` cobra al **crear o editar** un vuelo. Los vuelos cargados
+antes de pasar a modo `balance` nunca generaron transacción, así que la bitácora no
+puede decir cuánto salió cada uno: en la base de Federico, **39 de 41**.
+
+`GET /transactions/backfill` mira y no escribe —el botón necesita poder decir
+"faltan 39 vuelos, $X" antes de que el piloto acepte—. `POST` los graba.
+
+**El saldo no se mueve, y ésa es la restricción que manda.** Lo pidió Federico
+explícitamente y tiene razón: el saldo actual es correcto, refleja la plata que
+entró y salió. Meter 39 cobros retroactivos lo hundiría por dinero que ya estaba
+contabilizado de otra forma.
+
+La solución es que junto con los cobros va **una única transacción de ajuste por la
+suma exacta**, así que el neto sobre el saldo es cero. Suena a truco y no lo es: los
+cobros son el **registro histórico del costo de cada vuelo**, no un movimiento de
+dinero nuevo. El ajuste dice exactamente eso en su descripción y queda visible en el
+listado.
+
+Tres detalles que no se deducen del código:
+
+- **Se saltean los vuelos cuya aeronave no tiene precio cargado.** Un cobro en cero
+  no aporta nada —el frontend lo trata como "no sé" igual, ver `src/lib/costos.ts`—
+  y ensuciaría el listado con decenas de líneas en $0.
+- **El descuento se aplica igual que en `_sync_flight_transaction`**, para que un
+  vuelo reconstruido y uno cobrado en su momento den el mismo número.
+- **El precio es el de hoy, y es una reconstrucción, no un dato.** De esos vuelos
+  viejos no existe el precio histórico porque nunca se registró. La tarjeta del
+  frontend lo dice con todas las letras.
+
+Idempotente: sólo mira los vuelos **sin** cobro, así que correrlo dos veces no
+duplica nada.
