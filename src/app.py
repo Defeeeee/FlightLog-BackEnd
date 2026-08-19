@@ -20,6 +20,7 @@ from src.controllers.transactions import TransactionsController
 from src.controllers.whatsapp import WhatsAppController
 from src.controllers.audit import AuditController
 from src.controllers.documents import DocumentsController, DocumentAlertsController
+from src.controllers.flight_briefings import FlightBriefingsController
 from src.auth.security import AuthHandler
 from src.config import settings
 
@@ -73,7 +74,8 @@ api_router = Router(
         WhatsAppController,
         AuditController,
         DocumentsController,
-        DocumentAlertsController
+        DocumentAlertsController,
+        FlightBriefingsController
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)
