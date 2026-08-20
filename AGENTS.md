@@ -583,3 +583,56 @@ Tres detalles que no se deducen del código:
 
 Idempotente: sólo mira los vuelos **sin** cobro, así que correrlo dos veces no
 duplica nada.
+
+## Editar un vuelo programado nunca funcionó — 2026-08-20
+
+Un piloto intentó corregir el horario de un plan y le salió
+`Validation failed for PATCH /planned-flights/<id>`, sin decir qué campo.
+
+### La causa
+
+`PlannedFlightUpdate` importaba `from datetime import date` y tiene un campo que se llama
+`date`:
+
+```python
+date: Optional[date] = None
+```
+
+**Python asigna el default antes de evaluar la anotación.** Para cuando mira
+`Optional[date]`, el nombre `date` ya vale `None` en el cuerpo de la clase, así que el campo
+queda tipado `NoneType` y pydantic **rechaza cualquier valor que no sea nulo**. Lo mismo le
+pasó a `postponed_until`, que estaba dos líneas más abajo y usa el mismo tipo.
+
+`PlannedFlightBase` zafó de casualidad: ahí `date: date` no tiene default, y sin asignación
+no hay nada que ensombrezca el nombre.
+
+### Por qué sobrevivió tanto
+
+Porque **no rompe nada visible**. El módulo importa bien, la app arranca bien, `ruff` no
+dice nada y el paso de CI que hace `import src.app` pasa. El único síntoma es un 400 en
+tiempo de request con un mensaje que no nombra el campo. Estuvo así desde que se escribió el
+modelo, con dos endpoints rotos todo ese tiempo:
+
+- **editar un vuelo programado**, porque el formulario del calendario siempre manda `date`;
+- **posponerlo**, porque `posponerProgramado` manda `postponed_until` y nada más.
+
+Descartar y completar seguían andando, que es por qué el calendario parecía funcionar.
+
+### El arreglo, y por qué el test es genérico
+
+Los tipos se usan calificados: `import datetime as dt` y `dt.date`. El comentario del
+archivo explica el mecanismo, porque el próximo que agregue un campo va a tener la misma
+tentación.
+
+`test_models.py` **no testea este modelo**: recorre todos los modelos y falla si algún campo
+quedó tipado `NoneType`. La trampa es del lenguaje y no de este archivo — cualquier modelo
+con un campo llamado como un tipo importado la pisa, y `date`, `time`, `status` y `type` son
+nombres normales. Un test de `PlannedFlightUpdate` habría tapado este caso y dejado pasar el
+próximo. `NoneType` no es un tipo que alguien escriba a mano: si aparece, es esto.
+
+Verificado al revés, que es lo que le da valor: con el modelo viejo los tres tests fallan y
+el genérico nombra los dos campos.
+
+Va a CI como paso propio. El runner atrapa `Exception` y no sólo `AssertionError`, porque
+este bug se manifiesta como un `ValidationError` al construir el modelo y si no aborta la
+corrida entera en vez de reportarlo.

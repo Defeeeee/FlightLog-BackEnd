@@ -35,6 +35,15 @@ jobs:
       - name: Motor de auditoría
         run: python test_audit_engine.py
 
+      # También offline. Atrapa la clase de bug que estuvo viva desde la migración
+      # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
+      # No rompe el import ni el arranque, así que el paso de arriba no lo ve.
+      - name: Modelos
+        env:
+          SUPABASE_URL: "https://dummy.supabase.co"
+          SUPABASE_PUBLISHABLE_KEY: "dummy-key"
+        run: python test_models.py
+
       # OJO: `test_registration.py` NO se corre acá y no debería. Pega contra un
       # server en localhost:8000 y **crea un usuario de verdad** en Supabase.
       # Es un script manual, no un test.
