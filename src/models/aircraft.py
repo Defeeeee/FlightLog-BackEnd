@@ -16,6 +16,16 @@ class Aircraft(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    #: `true` = dispositivo de entrenamiento, no aeronave.
+    #:
+    #: El piloto anota el simulador en el libro como cualquier vuelo —fecha, horarios,
+    #: el equipo— y las horas van a la columna de instrucción terrestre. Esta marca es
+    #: lo que le permite al tracker de 61.620 **no** sumar esas horas a la experiencia
+    #: total: las 200 h son horas de vuelo, y una sesión de simulador no lo es.
+    #:
+    #: Va en la aeronave y no en el vuelo porque así no se puede olvidar: se carga una
+    #: vez al dar de alta el equipo y cada fila que lo use queda marcada sola.
+    is_simulator: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,6 +41,16 @@ class AircraftCreate(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    #: `true` = dispositivo de entrenamiento, no aeronave.
+    #:
+    #: El piloto anota el simulador en el libro como cualquier vuelo —fecha, horarios,
+    #: el equipo— y las horas van a la columna de instrucción terrestre. Esta marca es
+    #: lo que le permite al tracker de 61.620 **no** sumar esas horas a la experiencia
+    #: total: las 200 h son horas de vuelo, y una sesión de simulador no lo es.
+    #:
+    #: Va en la aeronave y no en el vuelo porque así no se puede olvidar: se carga una
+    #: vez al dar de alta el equipo y cada fila que lo use queda marcada sola.
+    is_simulator: bool = False
 
 class AircraftUpdate(BaseModel):
     registration: Optional[str] = None
@@ -44,3 +64,4 @@ class AircraftUpdate(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    is_simulator: Optional[bool] = None
