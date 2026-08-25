@@ -44,6 +44,12 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: "dummy-key"
         run: python test_models.py
 
+      # Offline: arma su propio árbol de PDF en un directorio temporal. Lo que
+      # importa de verdad es que no se pueda escapar de la carpeta configurada
+      # con `../` en la categoría o el nombre de archivo.
+      - name: Cartas Jeppesen
+        run: python test_charts_service.py
+
       # OJO: `test_registration.py` NO se corre acá y no debería. Pega contra un
       # server en localhost:8000 y **crea un usuario de verdad** en Supabase.
       # Es un script manual, no un test.

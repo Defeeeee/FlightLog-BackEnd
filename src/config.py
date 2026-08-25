@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     documents_alert_secret: Optional[str] = Field(default=None, validation_alias="DOCUMENTS_ALERT_SECRET")
     whatsapp_webhook_secret: Optional[str] = Field(default=None, validation_alias="WHATSAPP_WEBHOOK_SECRET")
 
+    # Dónde vive `Charts/Argentina` en el disco del servidor: cientos de PDF de
+    # Jeppesen, fuera de git a propósito (ver ChartsController). Sin configurar,
+    # el controller falla cerrado devolviendo vacío/404 en vez de reventar —mismo
+    # criterio que `documents_alert_secret`.
+    jeppesen_charts_dir: Optional[str] = Field(default=None, validation_alias="JEPPESEN_CHARTS_DIR")
+
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
     google_client_secret: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")
