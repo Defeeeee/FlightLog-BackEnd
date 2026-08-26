@@ -636,3 +636,17 @@ el genérico nombra los dos campos.
 Va a CI como paso propio. El runner atrapa `Exception` y no sólo `AssertionError`, porque
 este bug se manifiesta como un `ValidationError` al construir el modelo y si no aborta la
 corrida entera en vez de reportarlo.
+### 2026-08-26 — Plan Idempotencia y Paginación
+
+**Agente:** Antigravity (AI)
+**Estado:** Finalizado
+**Archivos:** `migrations/017_briefing_sent_at.sql`, `FlightLog-BackEnd/src/models/planned_flight.py`, `FlightLog-BackEnd/src/controllers/flight_briefings.py`, `Vector-FrontEnd/src/app/api/cron/briefing-vuelos/route.ts`, `Vector-FrontEnd/src/components/dashboard/FlightListClient.tsx`, `FlightLog-BackEnd/src/controllers/flights.py`
+
+**Qué se hizo:**
+1. **Limpieza de Ramas**: Se eliminaron local y remotamente ramas antiguas (`security/whatsapp-shared-secret`, `feat/flightdeck-look`, etc.) ya integradas.
+2. **Idempotencia de Briefings (Backend y Cron)**: Se añadió la columna `briefing_sent_at` en `planned_flights`. El endpoint de barrido ignora los ya enviados, y se creó `/api/flight-briefings/mark-sent` para que el cron del frontend avise del éxito. Soluciona envíos repetidos ante timeouts.
+3. **Paginación DOM de Vuelos**: Se implementó limitación DOM (renderizando de a 30 vuelos con botón "Cargar más") en `FlightListClient`, evitando el lag de renderizar 2000 nodos de golpe, manteniendo el buscador instantáneo en frontend.
+4. **Endpoint de Historial Paginado**: Se añadió `GET /flights/history` en el backend preparado para integraciones futuras o exportaciones fraccionadas.
+
+**Por qué:**
+El plan 06 (y charlas con el piloto) requerían cerrar estas deudas operativas y técnicas. El historial completo crasheaba o se arrastraba con muchos registros; la idempotencia previene spam.

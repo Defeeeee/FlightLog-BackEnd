@@ -113,6 +113,52 @@ class FlightsController(Controller):
             # Create new
             supabase_client.table("transactions").insert(tx_data).execute()
 
+    @get("/history")
+    async def get_history(
+        self,
+        request: Request,
+        supabase_client: Client,
+        limit: int = 50,
+        offset: int = 0,
+        q: Optional[str] = None,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        aeronaveId: Optional[str] = None,
+        proposito: Optional[str] = None
+    ) -> dict:
+        """Fetch paginated flights for the authenticated user's history, with optional filtering."""
+        user_id = str(request.state.user.id)
+        query = supabase_client.table("flights").select("*, aircraft(*)", count="exact").eq("user_id", user_id)
+        
+        if desde:
+            query = query.gte("date", desde)
+        if hasta:
+            query = query.lte("date", hasta)
+        if aeronaveId:
+            query = query.eq("aircraft_id", aeronaveId)
+        if proposito:
+            query = query.eq("purpose", proposito)
+            
+        if q:
+            # We use an or-filter for the text search across route, remarks, aircraft.registration, aircraft.type
+            # Wait, PostgREST can do embedded filtering, but ilike across joined tables is tricky.
+            # We'll just search route and remarks for simplicity, or we can use a raw ilike if we know the schema.
+            term = f"%{q}%"
+            query = query.or_(f"route.ilike.{term},remarks.ilike.{term}")
+
+        response = query.order("takeoff", desc=True).range(offset, offset + limit - 1).execute()
+        
+        # Format the items back to what the frontend expects (Flight model format)
+        items = []
+        for data in response.data:
+            data.pop("aircraft", None) # Remove joined aircraft before validation
+            items.append(Flight(**data).model_dump(mode="json", by_alias=True))
+
+        return {
+            "items": items,
+            "total": response.count if response.count is not None else 0
+        }
+
     @get()
     async def list_flights(self, request: Request, supabase_client: Client) -> List[Flight]:
         """Fetch all flights belonging to the authenticated user."""
