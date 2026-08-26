@@ -31,7 +31,7 @@ caracteres son peligrosos.
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, TypedDict
+from typing import List, Optional, TypedDict
 
 ICAO_RE = re.compile(r"^[A-Z0-9]{4}$")
 
