@@ -650,3 +650,12 @@ corrida entera en vez de reportarlo.
 
 **Por qué:**
 El plan 06 (y charlas con el piloto) requerían cerrar estas deudas operativas y técnicas. El historial completo crasheaba o se arrastraba con muchos registros; la idempotencia previene spam.
+
+### 2026-08-26 — Fix de Integridad (Linting)
+
+**Agente:** Antigravity (AI)
+**Estado:** Finalizado
+**Archivos:** `src/controllers/flight_briefings.py`, `src/services/charts.py`
+
+**Qué se hizo:**
+1. **Linting:** Se importó `datetime as dt` en el controlador de briefings y se limpió el import sin uso de `Dict` en el servicio de cartas. Esto restauró la pipeline de CI de GitHub Actions que estaba fallando tras el último despliegue.
