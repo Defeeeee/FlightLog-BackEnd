@@ -2,7 +2,7 @@ import hmac
 from datetime import date, timedelta
 from typing import List, Optional
 
-from litestar import Controller, Request, get
+from litestar import Controller, Request, get, post
 from litestar.exceptions import NotAuthorizedException
 from pydantic import BaseModel
 
@@ -82,6 +82,7 @@ class FlightBriefingsController(Controller):
             .select("id, user_id, date, route, aircraft_id, status")
             .eq("date", objetivo.isoformat())
             .eq("status", "programado")
+            .is_("briefing_sent_at", "null")
             .execute()
         )
         planned = planned_resp.data or []
@@ -130,3 +131,27 @@ class FlightBriefingsController(Controller):
             )
 
         return salida
+
+    @post("/mark-sent")
+    async def mark_sent(
+        self, request: Request, data: List[str], secret: Optional[str] = None
+    ) -> dict:
+        """
+        Marca un lote de vuelos programados como notificados, para que no salgan en
+        el próximo barrido si el cron reintenta. `data` es una lista de UUIDs (`planned_id`).
+        """
+        self._verify_secret(self._secret_from(request, secret))
+        if not data:
+            return {"updated": 0}
+
+        service_client = SupabaseManager.get_service_client()
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        
+        # Supabase Python client can update multiple rows by using in_ filter.
+        resp = (
+            service_client.table("planned_flights")
+            .update({"briefing_sent_at": now})
+            .in_("id", data)
+            .execute()
+        )
+        return {"updated": len(resp.data or [])}

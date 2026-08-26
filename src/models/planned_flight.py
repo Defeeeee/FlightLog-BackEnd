@@ -66,6 +66,7 @@ class PlannedFlightUpdate(BaseModel):
     status: Optional[Literal["programado", "completado", "descartado"]] = None
     flight_id: Optional[UUID] = None
     postponed_until: Optional[dt.date] = None
+    briefing_sent_at: Optional[dt.datetime] = None
 
 
 class PlannedFlight(PlannedFlightBase):
@@ -76,6 +77,7 @@ class PlannedFlight(PlannedFlightBase):
     #: `completado`, y lo que hace imposible convertirlo dos veces.
     flight_id: Optional[UUID] = None
     postponed_until: Optional[dt.date] = None
+    briefing_sent_at: Optional[dt.datetime] = None
     created_at: dt.datetime
     updated_at: dt.datetime
 
