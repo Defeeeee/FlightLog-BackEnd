@@ -128,8 +128,12 @@ class FlightsController(Controller):
     ) -> dict:
         """Fetch paginated flights for the authenticated user's history, with optional filtering."""
         user_id = str(request.state.user.id)
+        # Sin tope, `limit` viaja tal cual llega en la query string: nada le impedía a
+        # alguien pedir el historial entero de un saque.
+        limit = min(max(limit, 1), 200)
+        offset = max(offset, 0)
         query = supabase_client.table("flights").select("*, aircraft(*)", count="exact").eq("user_id", user_id)
-        
+
         if desde:
             query = query.gte("date", desde)
         if hasta:
@@ -138,16 +142,16 @@ class FlightsController(Controller):
             query = query.eq("aircraft_id", aeronaveId)
         if proposito:
             query = query.eq("purpose", proposito)
-            
+
         if q:
-            # We use an or-filter for the text search across route, remarks, aircraft.registration, aircraft.type
-            # Wait, PostgREST can do embedded filtering, but ilike across joined tables is tricky.
-            # We'll just search route and remarks for simplicity, or we can use a raw ilike if we know the schema.
+            # La búsqueda de texto sólo cubre `route` y `remarks`: un `ilike` contra
+            # `aircraft.registration` requeriría filtrar sobre la tabla embebida, que
+            # PostgREST no resuelve en el mismo `or_` que las columnas propias.
             term = f"%{q}%"
             query = query.or_(f"route.ilike.{term},remarks.ilike.{term}")
 
         response = query.order("takeoff", desc=True).range(offset, offset + limit - 1).execute()
-        
+
         # Format the items back to what the frontend expects (Flight model format)
         items = []
         for data in response.data:

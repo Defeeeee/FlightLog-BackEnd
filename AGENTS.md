@@ -659,3 +659,17 @@ El plan 06 (y charlas con el piloto) requerían cerrar estas deudas operativas y
 
 **Qué se hizo:**
 1. **Linting:** Se importó `datetime as dt` en el controlador de briefings y se limpió el import sin uso de `Dict` en el servicio de cartas. Esto restauró la pipeline de CI de GitHub Actions que estaba fallando tras el último despliegue.
+
+### 2026-08-26 — Revisión del trabajo de Antigravity: tope en `/flights/history`
+
+El piloto pidió revisar esta tanda. `GET /flights/history` (`src/controllers/flights.py`)
+tenía `limit`/`offset` tal cual llegaban de la query string, sin ningún tope: nada le
+impedía a un cliente pedir `limit=999999` y traer el historial entero de un vuelo. Se
+acota `limit` a `[1, 200]` y `offset` a `>= 0`. De paso se sacó un comentario de
+debugging que había quedado pegado al código (*"Wait, PostgREST can do embedded
+filtering..."*) — pensamiento en voz alta, no documentación.
+
+No se tocó nada más de lo que armó Antigravity acá: el endpoint sigue sin tener
+ningún consumidor en el frontend (la mitigación real del lag de renderizado fue del
+lado del cliente, limitando cuántos vuelos se pintan en el DOM), así que esto queda
+como un endpoint preparado y ahora acotado, no una feature activa.
