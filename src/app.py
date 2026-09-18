@@ -84,11 +84,47 @@ api_router = Router(
     }
 )
 
+def ampliar_pool_de_hilos() -> None:
+    """
+    Un pool de hilos a la medida de la espera, no de los cores.
+
+    Todo lo que este backend hace contra Supabase es **sincrónico** —`supabase-py`
+    no tiene versión async— así que cada consulta sale por `asyncio.to_thread`, que
+    usa el executor por defecto del loop. Ese default es
+    `min(32, os.cpu_count() + 4)`: en esta máquina de 4 cores, **8 hilos**.
+
+    Ocho alcanzaría si los hilos estuvieran calculando. No lo están: están
+    esperando a us-east-1, con el GIL suelto, ~155-180 ms por viaje medidos desde
+    el VPS. Y `/dashboard` solo pide **ocho** para sus ocho consultas en paralelo,
+    así que una sola carga de dashboard ya llena el pool: el guard de cualquier
+    otro request que llegue al mismo tiempo se queda esperando un hilo libre, y esa
+    espera cuesta un viaje entero al otro hemisferio.
+
+    Se ve en la medición: seis requests concurrentes tardan 0,17 s de pared; doce
+    tardan 0,47 s. El doble de trabajo, casi el triple de tiempo — la firma de un
+    pool saturado, no de un CPU saturado (la máquina está al 0,7 de load).
+
+    40 es holgado para el patrón real (cinco cargas de dashboard simultáneas a
+    pleno paralelismo) y sigue siendo barato: un hilo bloqueado en red no consume
+    CPU, y el proceso entero usa 157 MB en una máquina con 24 GB.
+
+    **No es una licencia para hacer más consultas.** El viaje a us-east-1 lo paga
+    igual cada una; esto sólo evita que se hagan cola entre ellas.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=40, thread_name_prefix="supabase")
+    )
+
+
 # 5. Main Application Configuration
 app = Litestar(
     route_handlers=[api_router],
     cors_config=cors_config,
     openapi_config=openapi_config,
     exception_handlers={Exception: internal_server_error_handler},
-    debug=settings.debug
+    debug=settings.debug,
+    on_startup=[ampliar_pool_de_hilos],
 )

@@ -5,6 +5,7 @@ from typing import Dict, List
 from uuid import UUID
 from src.models.profile import Profile, ProfileUpdate
 from src.auth.guards import auth_guard
+from src.auth.security import AuthHandler
 
 
 def _parse_name(metadata: Dict) -> Dict[str, str]:
@@ -47,7 +48,14 @@ class ProfilesController(Controller):
             # piloto recibía una lista vacía. Cinco usuarios quedaron sin poder
             # usar la app. **No devolver [] en silencio de nuevo.**
             try:
-                user_res = supabase_client.auth.get_user()
+                # Con el token explícito y no `get_user()` a secas: el cliente ya
+                # no trae una sesión cargada (ver `get_user_scoped_client`), así
+                # que la versión sin argumento no tendría de dónde sacarla. Éste
+                # es el único viaje a GoTrue del camino, y sólo cuando falta el
+                # perfil.
+                user_res = supabase_client.auth.get_user(
+                    AuthHandler.extract_bearer_token(request)
+                )
                 if user_res.user:
                     user = user_res.user
                     supabase_client.table("profiles").insert({

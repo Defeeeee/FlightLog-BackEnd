@@ -673,3 +673,192 @@ No se tocó nada más de lo que armó Antigravity acá: el endpoint sigue sin te
 ningún consumidor en el frontend (la mitigación real del lag de renderizado fue del
 lado del cliente, limitando cuántos vuelos se pintan en el DOM), así que esto queda
 como un endpoint preparado y ahora acotado, no una feature activa.
+
+### 2026-09-18 — Latencia de autenticación: ~400 ms por request y el event loop bloqueado
+
+**Agente:** Claude Opus 5 (Claude Code), para Federico Díaz Nemeth
+**Estado:** Terminado en código, **sin desplegar**
+**Archivos:** `src/supabase_client.py`, `src/auth/guards.py`,
+`src/controllers/auth.py`, `src/controllers/profiles.py`, `test_verify_token.py`
+
+**Qué se hizo:**
+
+1. **Se sacó el `set_session` de `get_user_scoped_client`.** Leyendo
+   `supabase_auth/_sync/gotrue_client.py`: cuando el token no está vencido,
+   `set_session` llama a `get_user(access_token)`, o sea **un GET a GoTrue en
+   us-east-1** con el backend en São Paulo, para llenar un campo `user` que nadie
+   mira. Medido desde el VPS: **145-640 ms en cada request autenticado**. Para RLS
+   alcanza con `postgrest.auth(token)`, que no toca la red. Como efecto colateral
+   se cierra la carrera que el propio docstring describía: `set_session` emitía
+   `SIGNED_IN`, que pone `_postgrest = None`, y las ocho consultas en hilos de
+   `/dashboard` podían entrar juntas al inicializador perezoso.
+
+2. **Verificación de token local.** El proyecto firma **ES256** y publica la clave
+   pública en `/auth/v1/.well-known/jwks.json` (abierto, sin apikey).
+   `verify_access_token` valida la firma acá —**0,05 ms** contra 145-640 ms— con el
+   JWKS cacheado una hora, y lo refresca sólo ante un `kid` desconocido, que es lo
+   que pasa cuando Supabase rota claves. **Queda el fallback a GoTrue** si la
+   verificación local no puede decidir (token viejo firmado con el secreto
+   simétrico, rotación que el cache no vio): GoTrue sigue siendo la autoridad, así
+   que esto no puede aflojar la seguridad, sólo evitar el viaje cuando ya alcanza.
+
+3. **El guard dejó de bloquear el event loop.** `auth_guard` es `async` y llamaba
+   sincrónicamente a `verify_access_token` (y a la consulta de API key). Litestar
+   atiende en un solo loop: mientras eso dura, nadie más avanza. Seis requests
+   concurrentes a `/api/profiles` —las que manda una carga del dashboard— medidos
+   en producción antes del cambio: `0.198, 0.397, 0.593, 0.792, 0.987, 1.182 s`.
+   Una escalera perfecta de ~197 ms de escalón: 1,2 s de pared para algo que debía
+   tardar 200 ms. Ahora van por `asyncio.to_thread`.
+
+4. **`httpx` con pool.** `httpx.get(...)` de módulo abre conexión y hace handshake
+   TLS en cada llamada, y lo tira. Medido: 190-640 ms sin pool contra 145-165 ms
+   reusando el cliente.
+
+5. **Las dos rutas que sí necesitan sesión de auth la piden a mano:**
+   `/auth/update-password` (usa `update_user`) vía `establecer_sesion_de_auth`, y
+   la reparación de perfil de `/profiles` pasando el token a `get_user(token)`. Son
+   caminos fríos: pagan ellas el viaje, no las trece pantallas del dashboard.
+   `update-password` chequea que el token exista porque este controlador **no**
+   tiene `auth_guard` — convive con login y registro, que son anónimos.
+
+**Por qué así:** se midió antes de tocar, y casi todo lo sospechoso resultó
+inocente. Los avisos de índices faltantes y `auth_rls_initplan` del linter de
+Supabase son reales pero **no son la causa**: las tablas tienen 49 vuelos y 60
+transacciones, y un seq scan sobre 49 filas no se mide. Van a importar con tres
+órdenes de magnitud más de datos; hoy arreglarlos no movería el número. El costo
+era de red y de concurrencia, no de base.
+
+**Sobre bajar el JWKS con `httpx` y no con `PyJWKClient`:** `PyJWKClient` usa
+`urllib.request`, que trae su propio contexto SSL y su propio almacén de
+certificados, distinto del de `httpx` (que usa `certifi`). En un intérprete donde
+`urllib` no encuentra la CA —pasa, y pasó escribiendo esto— la verificación local
+fallaría **en silencio** y cada request se iría al fallback de red: la app seguiría
+andando y seguiría lenta, que es la clase de regresión que nadie mira. Un solo
+stack HTTP, uno solo que pueda romperse.
+
+**Alternativa descartada:** mover el proyecto de Supabase de us-east-1 a São Paulo.
+Es el mayor costo que queda —cada consulta cruza el hemisferio— pero es una
+migración de base con downtime, y con estos cambios las consultas van en paralelo y
+una sola vez por request.
+
+**Verificación:** `test_verify_token.py`, 8 casos, corre offline con un keypair
+ES256 generado en el test: token válido, vencido, `aud`/`iss` ajenos, sin `exp`,
+payload adulterado conservando la firma, basura, y **confusión de algoritmo**
+(HS256 firmado con la clave pública, que es el modo de falla clásico de verificar
+JWT asimétricos — si alguien agrega `"HS256"` a `algorithms`, ese test falla). Más
+`test_models.py`, `test_audit_engine.py` y `test_charts_service.py`, todos en
+verde, y `import src.app` limpio (los imports nuevos no arman ciclo). El fetch real
+del JWKS se probó contra el proyecto de producción desde el VPS: 250 ms la primera
+vez, 16 ms con el pool, una vez por hora.
+
+**Lo que NO se verificó:** un request con un token real de Supabase, porque no
+había credenciales de piloto en la sesión y no se fabricó una para no escribir en
+una bitácora real. Los 8 casos corren con un keypair propio, no con un token
+emitido por GoTrue. **La primera carga autenticada después del deploy es la que
+cierra eso**, y el fallback de red está justamente para que, si la verificación
+local fallara, la app funcione igual (lenta) en vez de dejar a todos afuera.
+
+**Nota sobre el frontend:** en esta misma sesión se diagnosticó como tercer
+problema que Next llamaba al backend por el dominio público en vez de por
+localhost. **Era un diagnóstico viejo:** el repo local estaba 5 commits atrás y eso
+ya se había arreglado y desplegado el 2026-08-27 (`ad72504`, después del revert de
+`e12eff1`). El cambio que se había preparado para "arreglarlo" habría sido una
+**regresión** —volvía a meter `NEXT_PUBLIC_API_URL` en la cadena, que es justo lo
+que hacía salir a internet— y se descartó sin aplicar. El frontend no se tocó.
+
+### 2026-09-18 (b) — El pool de hilos era de 8 y `/dashboard` solo pide 8
+
+**Agente:** Claude Opus 5 (Claude Code), para Federico Díaz Nemeth
+**Estado:** **En código, NO desplegado** — el deploy quedó pendiente de permiso.
+**Archivos:** `src/app.py`
+
+**Qué se hizo:** `ampliar_pool_de_hilos()` como `on_startup`, que reemplaza el
+executor por defecto del loop por uno de 40 hilos.
+
+**Por qué:** `supabase-py` es sincrónico, así que **toda** consulta sale por
+`asyncio.to_thread`, que usa el executor por defecto del loop. Ese default es
+`min(32, os.cpu_count() + 4)` — en esta máquina de 4 cores, **8 hilos**. Y
+`/dashboard` pide **exactamente 8** para sus ocho consultas en paralelo: una sola
+carga llena el pool entero.
+
+Medido en el VPS contra Supabase real, mediana de 7 corridas, simulando N cargas
+simultáneas de `/dashboard` (8 consultas cada una):
+
+| cargas simultáneas | pool=8 | pool=40 |      |
+|--------------------|--------|---------|------|
+| 1                  | 161 ms | 161 ms  | igual (las 8 entran) |
+| 2                  | 314 ms | 169 ms  | **1,86x** |
+| 3                  | 463 ms | 181 ms  | **2,55x** |
+| 5                  | 776 ms | 470 ms  | 1,65x |
+
+La columna de pool=8 es 161 / 314 / 463: casi exactamente `n × 155 ms`. Eso es una
+cola perfecta — cada tanda de 8 consultas espera un viaje entero a us-east-1 antes
+de que salga la siguiente. Con 40 el tiempo se queda plano hasta 3 cargas, que es
+lo que uno espera cuando el trabajo es esperar y no calcular.
+
+Importa **desde la segunda pestaña**: dos personas usando la app a la vez, o una
+con el dashboard abierto en dos lados, ya caen en esto. La máquina no estaba
+saturada en ningún momento (load 0,7 sobre 4 cores): no era CPU, era el pool.
+
+40 y no "muchos": es holgado para cinco cargas simultáneas a pleno paralelismo, y
+un hilo bloqueado en red no consume CPU (el proceso usa 157 MB de 24 GB). **No es
+licencia para hacer más consultas** — el viaje a us-east-1 lo paga igual cada una.
+
+**Verificación:** la tabla de arriba, medida con el patrón real (`to_thread` +
+consulta HTTP a Supabase) variando sólo `max_workers`. `import src.app` limpio.
+Falta la verificación en producción, que depende del deploy.
+
+### 2026-09-18 (c) — El costo que tapaba el anterior: 58 ms de CPU por request leyendo certificados
+
+**Agente:** Claude Opus 5 (Claude Code), para Federico Díaz Nemeth
+**Estado:** **En código, NO desplegado** — esperando permiso de deploy.
+**Archivos:** `src/supabase_client.py`
+
+**Cómo apareció:** después de desplegar (a) y (b), Federico reportó que la app
+seguía igual o peor. Los logs decían que (a) funcionaba — **0 fallbacks a GoTrue**
+en 17 requests autenticados, o sea que los tokens reales se verifican local, y
+**0 reintentos** en `/dashboard`, o sea que ninguna consulta falla. Así que el
+problema estaba en otro lado, y medirlo fue lo único que lo encontró.
+
+`get_user_scoped_client` costaba **58 ms de CPU pura por request**. Como
+`provide_supabase_client` corre en el event loop, eso son **~350 ms de bloqueo
+serializado por carga de dashboard** (seis requests). Perfilado:
+
+    load_verify_locations   0,546 s de 0,579 s  = 94% del tiempo
+
+Cada `httpx.Client` llama a `ssl.create_default_context()`, que **lee y parsea el
+bundle de CAs entero desde disco** (cientos de certificados, ~27 ms). `create_client`
+de supabase-py arma dos clientes httpx —auth y postgrest—, o sea **dos lecturas del
+bundle por request**.
+
+**Esto estuvo siempre ahí.** Lo tapaba el viaje a GoTrue de `set_session`, que era
+más caro todavía. Al sacarlo en (a), quedó como el término dominante — y además
+anulaba buena parte del pool de 40 hilos de (b), porque mientras el loop está
+bloqueado no importa cuántos hilos haya libres.
+
+**El arreglo:** memoizar `create_ssl_context`. Para los mismos parámetros el
+contexto es el mismo objeto, y un `SSLContext` está hecho para compartirse entre
+conexiones e hilos (el propio httpx acepta que le pasen uno ya construido).
+
+    get_user_scoped_client:  58,41 ms  →  0,17 ms   (340x)
+    por carga de dashboard:  350 ms    →  1,0 ms
+
+**No relaja TLS, y se comprobó en vez de suponerlo:** el contexto cacheado queda
+con `verify_mode=CERT_REQUIRED` y `check_hostname=True`, una conexión real a
+Supabase sigue funcionando, y **un certificado vencido sigue siendo rechazado**
+(`https://expired.badssl.com` → `ConnectError`).
+
+Es API privada de httpx, así que el parche entero va adentro de un `try`: si una
+versión nueva cambia de forma, no hace nada y el backend sigue andando, sólo más
+lento. Si los argumentos no son hasheables, cae a la función original.
+
+**De paso, el rebaño del JWKS.** En el primer login después del restart se vieron
+**6 bajadas del JWKS en 300 ms**: seis requests concurrentes encontraron el cache
+frío y bajaron todos. La bajada estaba **afuera** del lock, para no bloquear hilos
+en una operación de red. Pasó adentro: el primero baja, los demás esperan y
+encuentran el cache puesto. Cuesta que unos pocos requests esperen a uno solo, una
+vez por hora en vez de una vez por restart × concurrencia.
+
+**Verificación:** los cuatro archivos de test en verde, `import src.app` limpio, y
+las mediciones de arriba. Falta la verificación en producción, que depende del
+deploy.

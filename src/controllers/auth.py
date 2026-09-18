@@ -1,7 +1,8 @@
-from litestar import Controller, post, get, status_codes
+from litestar import Controller, post, get, status_codes, Request
 from litestar.exceptions import InternalServerException, NotAuthorizedException, TooManyRequestsException
 from supabase import Client
-from src.supabase_client import SupabaseManager
+from src.supabase_client import SupabaseManager, establecer_sesion_de_auth
+from src.auth.security import AuthHandler
 from src.models.auth import UserRegister, UserLogin, AuthResponse, PasswordRecover, PasswordUpdate, TokenRefresh
 
 class AuthController(Controller):
@@ -38,9 +39,22 @@ class AuthController(Controller):
             raise InternalServerException(detail=f"Recovery failed: {error_msg}")
 
     @post("/update-password")
-    async def update_password(self, supabase_client: Client, data: PasswordUpdate) -> dict:
+    async def update_password(self, request: Request, supabase_client: Client, data: PasswordUpdate) -> dict:
         """Update the user's password. Requires an active session."""
         try:
+            # `update_user` va contra GoTrue y necesita la sesión cargada en el
+            # cliente. El cliente inyectado ya no la trae por defecto —le costaba
+            # un viaje a us-east-1 a cada request de la app, ver
+            # `get_user_scoped_client`—, así que esta ruta la pide para sí.
+            #
+            # Este controlador **no** tiene `auth_guard` (convive con login y
+            # registro, que son anónimos), así que el token puede no venir. Sin él
+            # no hay sesión que cargar y `update_user` falla como siempre falló:
+            # con el "Auth session missing" de GoTrue, y no con un TypeError
+            # nuestro que diría cualquier otra cosa.
+            token = AuthHandler.extract_bearer_token(request)
+            if token:
+                establecer_sesion_de_auth(supabase_client, token)
             auth_response = supabase_client.auth.update_user({
                 "password": data.password
             })
