@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
@@ -71,6 +72,7 @@ class PerfilPublicoOut(BaseModel):
     licencia: Optional[str] = None
     bio: Optional[str] = None
     visibilidad: Visibilidad
+    avatar_url: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
@@ -96,6 +98,7 @@ class PilotoResumen(BaseModel):
     licencia: Optional[str] = None
     visibilidad: Visibilidad
     relacion: Relacion
+    avatar_url: Optional[str] = None
 
 
 class PilotoPublico(BaseModel):
@@ -115,14 +118,110 @@ class PilotoPublico(BaseModel):
     siguiendo: int
     relacion: Relacion
     horas: Optional[HorasPublicas] = None
+    avatar_url: Optional[str] = None
 
 
 class ResumenSocial(BaseModel):
-    """Para el layout: si el piloto tiene @ y cuántas solicitudes lo esperan."""
+    """
+    Para el layout: si el piloto tiene @, su foto, y el punto rojo de Pilotos —las
+    solicitudes que esperan respuesta más lo nuevo en su Actividad—.
+    """
 
     handle: Optional[str] = None
+    avatar_url: Optional[str] = None
     solicitudes_pendientes: int = 0
+    actividad_nueva: int = 0
 
 
 class EstadoSeguimiento(BaseModel):
     relacion: Relacion
+
+
+# ---------------------------------------------------------------------------
+# Publicaciones
+# ---------------------------------------------------------------------------
+
+class AutorOut(BaseModel):
+    """Quién publicó o comentó. Lo mismo que se ve de su @, nada más."""
+
+    handle: str
+    nombre_visible: str
+    licencia: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+class FotoOut(BaseModel):
+    """`url` es firmada y vence (6 h): no se guarda, se pide de nuevo."""
+
+    url: str
+    ancho: int
+    alto: int
+
+
+class VueloChip(BaseModel):
+    """Lo que el piloto eligió mostrar de un vuelo. Nunca la matrícula."""
+
+    ruta: Optional[str] = None
+    duracion: Optional[float] = None
+    aeronave: Optional[str] = None
+    fecha: Optional[str] = None
+
+
+class PublicacionOut(BaseModel):
+    id: UUID
+    autor: AutorOut
+    texto: Optional[str] = None
+    vuelo: Optional[VueloChip] = None
+    fotos: List[FotoOut] = []
+    aplausos: int = 0
+    aplaudida: bool = False
+    comentarios: int = 0
+    es_mia: bool = False
+    #: Sólo para el autor: de qué vuelo salió. A nadie más se le devuelve.
+    vuelo_id: Optional[UUID] = None
+    created_at: datetime
+
+
+class PaginaPublicaciones(BaseModel):
+    """`siguiente` es el cursor de la próxima página, o `None` si no hay más."""
+
+    publicaciones: List[PublicacionOut]
+    siguiente: Optional[str] = None
+
+
+class ComentarioIn(BaseModel):
+    texto: str
+
+
+class ComentarioOut(BaseModel):
+    id: UUID
+    autor: AutorOut
+    texto: str
+    created_at: datetime
+    #: Su autor, o el de la publicación.
+    puede_borrar: bool = False
+
+
+class EstadoAplauso(BaseModel):
+    aplausos: int
+    aplaudida: bool
+
+
+class AvatarOut(BaseModel):
+    avatar_url: Optional[str] = None
+
+
+TipoEvento = Literal["seguidor", "solicitud", "aplauso", "comentario"]
+
+
+class EventoActividad(BaseModel):
+    tipo: TipoEvento
+    piloto: AutorOut
+    created_at: datetime
+    nuevo: bool = False
+    #: Para un comentario, su texto; para un aplauso, el comienzo de la publicación.
+    texto: Optional[str] = None
+
+
+class Actividad(BaseModel):
+    eventos: List[EventoActividad]

@@ -28,6 +28,12 @@ from src.controllers.social import (
     PilotosController,
     SocialController,
 )
+from src.controllers.publicaciones import (
+    AvatarController,
+    PublicacionesController,
+    PublicacionesPublicasController,
+    RedController,
+)
 from src.auth.security import AuthHandler
 from src.config import settings
 
@@ -90,6 +96,12 @@ api_router = Router(
         PilotosController,
         SocialController,
         PerfilesPublicosController,
+        # El contenido de la red: fotos, publicaciones, la Red y la Actividad. Ver
+        # `src/controllers/publicaciones.py`.
+        AvatarController,
+        PublicacionesController,
+        RedController,
+        PublicacionesPublicasController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)
@@ -137,6 +149,11 @@ app = Litestar(
     cors_config=cors_config,
     openapi_config=openapi_config,
     exception_handlers={Exception: internal_server_error_handler},
+    # 30 MB y no los 10 por defecto: una publicación trae hasta cuatro fotos, y aunque
+    # el navegador las achica antes de subir, un cliente que mande los originales no
+    # tiene que chocar contra el tope. Cada foto igual se corta en 12 MB
+    # (`src/services/imagenes.py`).
+    request_max_body_size=30_000_000,
     debug=settings.debug,
     on_startup=[ampliar_pool_de_hilos],
 )

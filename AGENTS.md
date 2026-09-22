@@ -924,3 +924,72 @@ defecto que se ven sin cuenta.
   - el anónimo ve los perfiles y no los seguimientos, y no puede crear perfiles.
 
   Después, las dos tablas en 0 filas. Los advisors de seguridad no marcan nada nuevo.
+
+### 2026-09-22 14:38 UTC — Claude (Opus 5, vía Claude Code) — La red con contenido: fotos, publicaciones, aplausos, comentarios y Actividad
+
+**Quién:** Claude Opus 5 corriendo en Claude Code, para Federico Díaz Nemeth, con plan
+aprobado por él.
+
+**Qué cambié:**
+- `migrations/019_red_publicaciones.sql` — **ya aplicada** (`red_publicaciones`). Suma:
+  - `avatar_path` y `actividad_vista_at` en `perfiles_publicos`;
+  - las tablas `publicaciones`, `publicacion_fotos`, `aplausos` y `comentarios`;
+  - la función de visibilidad `puede_ver_autor()` y `resumen_social()`;
+  - los buckets `avatares` (público) y `publicaciones` (privado).
+- `src/services/imagenes.py` — Pillow re-codifica toda foto: sin EXIF, con la
+  orientación aplicada, en WebP, 1600 px (512 cuadrada para el perfil). Pillow se sumó a
+  `requirements.txt`.
+- `src/services/social.py` — `resumen_de_vuelo`, `ruta_legible`,
+  `validar_publicacion`, `validar_comentario`, `ordenar_actividad` y `url_avatar`.
+  Además, los nombres de las pantallas de la red pasan a reservados.
+- `src/controllers/publicaciones.py` (nuevo):
+  - `/perfil-publico/avatar`;
+  - `/publicaciones` (publicar, borrar, aplauso, comentarios);
+  - `/red` (feed, actividad, marcar vista, mis publicaciones);
+  - `/publico/...` sin guard (publicaciones de un piloto, comentarios).
+- `src/controllers/social.py`:
+  - la foto en todas las salidas;
+  - `/social/resumen` en un viaje por RPC;
+  - `/pilotos/sugeridos`;
+  - salir de la red borra también sus archivos del storage.
+- `src/app.py` — registra los controladores y sube `request_max_body_size` a 30 MB.
+- `test_publicaciones.py` (38 checks) en CI, y `limpiar_storage.py`, que barre huérfanos
+  y corre en seco por defecto.
+
+**Por qué:**
+- **El RLS decide qué se ve.** Toda lectura va con el cliente de quien mira: el propio, o
+  el anónimo. La regla vive en `puede_ver_autor()`, y las políticas de fotos, aplausos y
+  comentarios la heredan preguntando por la publicación, cuyo RLS ya la aplica.
+- **Estas rutas exigen Bearer, no `X-API-Key`.** Con una API key,
+  `provide_supabase_client` entrega service role, que se saltea el RLS.
+- **`security invoker` en las funciones.** Un anónimo no lee `seguimientos` y no lo
+  necesita: sin `auth.uid()` no sigue a nadie.
+- **El resumen del layout es una RPC**, porque el layout lo pide en cada pantalla. Con
+  consultas sueltas eran cinco viajes a us-east-1; así es uno, en paralelo con los que ya
+  hacía.
+- **Fotos de publicaciones en un bucket privado con URLs firmadas de 6 h**: una foto de
+  un perfil privado no puede quedar a un link de distancia de cualquiera. La foto de
+  perfil va en un bucket público porque se ve donde se ve el @, que ya es público.
+- **El chip del vuelo es una copia**, sin matrícula y sólo con el primer y el último
+  punto: los intermedios dicen por dónde pasó el piloto.
+
+**Estado:** Terminado; lo consume el frontend 2.20.0.
+- **Borrar una cuenta desde la base no borra sus archivos**: correr
+  `python limpiar_storage.py` (en seco) y después `--borrar`.
+- Salir de la red desde la app sí los borra.
+
+**Verificación:**
+- `test_publicaciones.py` (38 ✅): una foto con GPS en el EXIF sale sin EXIF, la
+  orientación se aplica, se rechazan SVG, GIF y archivos rotos, y el chip nunca lleva
+  matrícula.
+- `test_social.py`, `import src.app` (15 rutas nuevas) y `ruff`.
+- **RLS contra la base real, 16 casos en un bloque que se deshace solo**, usando sólo
+  cuentas sin @. Pasaron:
+  - el anónimo ve lo público y no lo privado, no comenta y no lista el bucket privado;
+  - un pendiente no ve lo privado ni lo aplaude o comenta; un aceptado sí;
+  - nadie publica a nombre de otro, sube fotos a lo ajeno ni borra lo ajeno;
+  - el dueño borra comentarios ajenos de lo suyo, y nada se edita;
+  - `resumen_social()` cuenta 1 solicitud y 3 novedades.
+- Los `select` con embebidos (`aplausos(count)`, las FK nombradas) se probaron contra la
+  base con el anónimo. Los advisors no marcan nada nuevo.
+- **Falta:** la prueba del storage de punta a punta, que depende del deploy (Pillow).

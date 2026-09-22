@@ -24,6 +24,7 @@ from supabase import Client
 
 from src.auth.guards import auth_guard
 from src.auth.security import AuthHandler
+from src.config import settings
 from src.models.social import (
     EstadoSeguimiento,
     HorasPublicas,
@@ -42,11 +43,12 @@ from src.services.social import (
     limpiar_busqueda,
     puede_ver_horas,
     relacion_con,
+    url_avatar,
     validar_handle,
 )
 from src.supabase_client import SupabaseManager, verify_access_token
 
-_COLUMNAS_PERFIL = "user_id, handle, nombre_visible, licencia, bio, visibilidad, created_at"
+_COLUMNAS_PERFIL = "user_id, handle, nombre_visible, licencia, bio, visibilidad, avatar_path, created_at"
 _HANDLE_OCUPADO = "Ese @ ya lo tiene otro piloto."
 _NO_EXISTE = "No existe ese piloto."
 
@@ -100,8 +102,13 @@ def _mis_estados(client: Client, yo: str, user_ids: List[str]) -> Dict[str, str]
     return {fila["seguido"]: fila["estado"] for fila in (r.data or [])}
 
 
+def _avatar(fila: Dict[str, Any]) -> Optional[str]:
+    return url_avatar(settings.supabase_url, fila.get("avatar_path"))
+
+
 def _salida(fila: Dict[str, Any]) -> PerfilPublicoOut:
-    return PerfilPublicoOut(**{k: v for k, v in fila.items() if k != "user_id"})
+    datos = {k: v for k, v in fila.items() if k not in ("user_id", "avatar_path", "actividad_vista_at")}
+    return PerfilPublicoOut(**datos, avatar_url=_avatar(fila))
 
 
 def _resumenes(client: Client, yo: str, filas: List[Dict[str, Any]]) -> List[PilotoResumen]:
@@ -113,6 +120,7 @@ def _resumenes(client: Client, yo: str, filas: List[Dict[str, Any]]) -> List[Pil
             licencia=f.get("licencia"),
             visibilidad=f["visibilidad"],
             relacion=relacion_con(yo, f["user_id"], estados.get(f["user_id"])),
+            avatar_url=_avatar(f),
         )
         for f in filas
     ]
@@ -188,11 +196,38 @@ class PerfilPublicoController(Controller):
 
     @delete(status_code=200)
     async def salir(self, request: Request, supabase_client: Client) -> MiPerfilPublico:
-        """Salir de la red: se borra el @ y, en cascada, todos sus seguimientos."""
+        """
+        Salir de la red: se borra el @ y, en cascada, seguimientos, publicaciones,
+        aplausos y comentarios.
+
+        **Los archivos no caen en cascada**: son del storage, no de la base. Se juntan
+        antes de borrar —después ya no queda fila que diga cuáles eran— y se borran
+        después, cuando la base ya no los referencia.
+        """
         yo = _yo(request)
-        await asyncio.to_thread(
-            lambda: supabase_client.table("perfiles_publicos").delete().eq("user_id", yo).execute()
-        )
+
+        def _salir() -> None:
+            mio = _perfil_de(supabase_client, yo)
+            mias = supabase_client.table("publicaciones").select("id").eq("autor", yo).execute().data or []
+            fotos: List[str] = []
+            if mias:
+                r = (
+                    supabase_client.table("publicacion_fotos").select("path")
+                    .in_("publicacion_id", [m["id"] for m in mias]).execute()
+                )
+                fotos = [f["path"] for f in (r.data or [])]
+            supabase_client.table("perfiles_publicos").delete().eq("user_id", yo).execute()
+            storage = SupabaseManager.get_service_client().storage
+            try:
+                if fotos:
+                    storage.from_("publicaciones").remove(fotos)
+                if mio and mio.get("avatar_path"):
+                    storage.from_("avatares").remove([mio["avatar_path"]])
+            except Exception as exc:  # noqa: BLE001
+                # Quedan huérfanos para `limpiar_storage.py`; el piloto ya salió de la red.
+                print(f"[storage] no se pudieron borrar los archivos de {yo}: {exc!r}")
+
+        await asyncio.to_thread(_salir)
         return MiPerfilPublico(perfil=None)
 
 
@@ -226,6 +261,31 @@ class PilotosController(Controller):
             return _resumenes(supabase_client, yo, r.data or [])
 
         return await asyncio.to_thread(_buscar)
+
+    @get("/sugeridos")
+    async def sugeridos(self, request: Request, supabase_client: Client) -> List[PilotoResumen]:
+        """
+        Pilotos públicos que todavía no seguís, los más nuevos primero. Es lo que llena
+        una Red vacía: con pocos pilotos en la app, esperar a que alguien busque un
+        nombre que no conoce es esperar para siempre.
+        """
+        yo = _yo(request)
+
+        def _leer() -> List[PilotoResumen]:
+            seguidos = [
+                s["seguido"] for s in (
+                    supabase_client.table("seguimientos").select("seguido").eq("seguidor", yo).execute().data or []
+                )
+            ]
+            fuera = [yo, *seguidos]
+            r = (
+                supabase_client.table("perfiles_publicos").select(_COLUMNAS_PERFIL)
+                .eq("visibilidad", "publico").not_.in_("user_id", fuera)
+                .order("created_at", desc=True).limit(6).execute()
+            )
+            return _resumenes(supabase_client, yo, r.data or [])
+
+        return await asyncio.to_thread(_leer)
 
     @post("/{handle:str}/seguir", status_code=200)
     async def seguir(self, request: Request, supabase_client: Client, handle: str) -> EstadoSeguimiento:
@@ -293,18 +353,21 @@ class SocialController(Controller):
 
     @get("/resumen")
     async def resumen(self, request: Request, supabase_client: Client) -> ResumenSocial:
-        """Para el layout: el @ propio y el punto rojo de las solicitudes."""
-        yo = _yo(request)
+        """Para el layout: el @ propio, su foto y el punto rojo de Pilotos."""
 
         def _resumen() -> ResumenSocial:
-            mio = _perfil_de(supabase_client, yo)
-            if not mio:
+            # Un solo viaje: `resumen_social()` (migración 019) cuenta solicitudes y
+            # actividad nueva adentro de la base. El layout lo pide en cada pantalla.
+            filas = supabase_client.rpc("resumen_social").execute().data or []
+            if not filas:
                 return ResumenSocial()
-            r = (
-                supabase_client.table("seguimientos").select("seguidor", count="exact", head=True)
-                .eq("seguido", yo).eq("estado", "pendiente").execute()
+            f = filas[0]
+            return ResumenSocial(
+                handle=f.get("handle"),
+                avatar_url=_avatar(f),
+                solicitudes_pendientes=f.get("solicitudes_pendientes") or 0,
+                actividad_nueva=f.get("actividad_nueva") or 0,
             )
-            return ResumenSocial(handle=mio["handle"], solicitudes_pendientes=r.count or 0)
 
         return await asyncio.to_thread(_resumen)
 
@@ -468,4 +531,5 @@ class PerfilesPublicosController(Controller):
             siguiendo=siguiendo,
             relacion=relacion,
             horas=horas,
+            avatar_url=_avatar(perfil),
         )

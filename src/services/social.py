@@ -13,6 +13,7 @@ del de la pantalla del propio piloto, ninguno de los dos números se creería.
 """
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -32,6 +33,9 @@ RESERVADOS = frozenset({
     "help", "staff", "equipo", "oficial", "anac", "api", "app", "u", "dashboard",
     "login", "register", "registro", "pilotos", "piloto", "perfil", "settings",
     "hangar", "null", "undefined", "www", "mail", "legal",
+    # Las pantallas que cuelgan de `/dashboard/pilotos/`: un @ con ese nombre quedaría
+    # tapado por la ruta fija y su perfil no se podría abrir.
+    "buscar", "actividad", "publicar", "red", "solicitudes",
 })
 
 
@@ -179,3 +183,133 @@ def limpiar_busqueda(crudo: Optional[str]) -> str:
     texto = normalizar_handle(crudo)
     texto = re.sub(r"[,()%*\\\"'`:]", " ", texto)
     return re.sub(r"\s+", " ", texto).strip()[:40]
+
+
+# ---------------------------------------------------------------------------
+# Publicaciones
+# ---------------------------------------------------------------------------
+
+TEXTO_MAX = 1000
+COMENTARIO_MAX = 500
+FOTOS_MAX = 4
+#: Por día y por piloto. Alcanza de sobra para usar la red y corta a un script.
+PUBLICACIONES_POR_DIA = 30
+COMENTARIOS_POR_DIA = 120
+
+#: Lo que la ruta de un simulador dice en vez de aeródromos. Ver `soloVolados` del
+#: frontend: `LOCAL` no es un aeródromo y no se muestra como uno.
+_NO_AERODROMOS = {"LOCAL", "SIM", "???"}
+
+
+def ruta_legible(route: Optional[str]) -> Optional[str]:
+    """
+    `"SADF SAAR"` → `"SADF → SAAR"`; un vuelo local → `"SADF · local"`.
+
+    Sólo el primero y el último: los puntos intermedios de una travesía dicen por dónde
+    pasó el piloto, y eso no lo eligió publicar.
+    """
+    puntos = [p.upper() for p in re.split(r"[\s,\-–>→]+", route or "") if p.strip()]
+    puntos = [p for p in puntos if p not in _NO_AERODROMOS]
+    if not puntos:
+        return None
+    origen, destino = puntos[0], puntos[-1]
+    if origen == destino:
+        return f"{origen} · local"
+    return f"{origen} → {destino}"
+
+
+def resumen_de_vuelo(
+    flight: Dict[str, Any],
+    aircraft: Optional[Dict[str, Any]],
+    *,
+    ruta: bool = True,
+    duracion: bool = True,
+    aeronave: bool = False,
+    fecha: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """
+    El chip de una publicación: sólo los campos que el piloto prendió.
+
+    **Nunca la matrícula**, ni aunque se pida el avión: matrícula, aeródromo y hora
+    juntos dicen dónde está un avión y cuándo. Del avión sale el tipo ("Cessna 152").
+    `None` si no quedó nada que mostrar.
+    """
+    chip: Dict[str, Any] = {}
+    if ruta:
+        r = ruta_legible(flight.get("route"))
+        if r:
+            chip["ruta"] = r
+    if duracion and _n(flight.get("duration")) > 0:
+        chip["duracion"] = round(_n(flight.get("duration")), 1)
+    if aeronave and aircraft:
+        tipo = (aircraft.get("type") or "").strip()
+        if tipo:
+            chip["aeronave"] = tipo
+    if fecha and flight.get("date"):
+        chip["fecha"] = str(flight["date"])[:10]
+    return chip or None
+
+
+def validar_publicacion(texto: Optional[str], n_fotos: int, tiene_vuelo: bool) -> Optional[str]:
+    """El motivo por el que no se puede publicar, o `None`."""
+    limpio = (texto or "").strip()
+    if not limpio and n_fotos == 0 and not tiene_vuelo:
+        return "Escribí algo, subí una foto o elegí un vuelo."
+    if len(limpio) > TEXTO_MAX:
+        return f"El texto puede tener como mucho {TEXTO_MAX} caracteres."
+    if n_fotos > FOTOS_MAX:
+        return f"Podés subir hasta {FOTOS_MAX} fotos."
+    return None
+
+
+def validar_comentario(texto: Optional[str]) -> str:
+    """El comentario limpio, o `ValueError` con el motivo."""
+    limpio = (texto or "").strip()
+    if not limpio:
+        raise ValueError("El comentario está vacío.")
+    if len(limpio) > COMENTARIO_MAX:
+        raise ValueError(f"El comentario puede tener como mucho {COMENTARIO_MAX} caracteres.")
+    return limpio
+
+
+# ---------------------------------------------------------------------------
+# Actividad
+# ---------------------------------------------------------------------------
+
+def ordenar_actividad(eventos: List[Dict[str, Any]], vista_at: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Lo más nuevo primero, y `nuevo` en lo que pasó después de la última vez que el
+    piloto abrió su Actividad.
+
+    Las fechas llegan como ISO de Postgres; comparadas como texto fallan cuando un lado
+    trae microsegundos y el otro no, así que se parsean.
+    """
+    vista = _instante(vista_at)
+
+    def clave(e: Dict[str, Any]) -> datetime:
+        return _instante(e.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+
+    ordenados = sorted(eventos, key=clave, reverse=True)
+    for e in ordenados:
+        momento = _instante(e.get("created_at"))
+        e["nuevo"] = bool(momento and vista and momento > vista)
+    return ordenados
+
+
+def _instante(valor: Any) -> Optional[datetime]:
+    if not valor:
+        return None
+    if isinstance(valor, datetime):
+        return valor if valor.tzinfo else valor.replace(tzinfo=timezone.utc)
+    try:
+        momento = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return momento if momento.tzinfo else momento.replace(tzinfo=timezone.utc)
+
+
+def url_avatar(base_url: str, path: Optional[str]) -> Optional[str]:
+    """La URL pública de una foto de perfil. El bucket `avatares` es público (ver 019)."""
+    if not path:
+        return None
+    return f"{base_url.rstrip('/')}/storage/v1/object/public/avatares/{path}"

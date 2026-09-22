@@ -40,6 +40,11 @@ jobs:
       - name: Red social
         run: python test_social.py
 
+      # Offline: fabrica las fotos en memoria. El check que más importa es que una
+      # foto de teléfono, que trae la ubicación GPS, salga de acá sin EXIF.
+      - name: Publicaciones y fotos
+        run: python test_publicaciones.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.
