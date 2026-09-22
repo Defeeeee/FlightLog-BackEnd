@@ -862,3 +862,65 @@ vez por hora en vez de una vez por restart × concurrencia.
 **Verificación:** los cuatro archivos de test en verde, `import src.app` limpio, y
 las mediciones de arriba. Falta la verificación en producción, que depende del
 deploy.
+
+### 2026-09-22 13:49 UTC — Claude (Opus 5, vía Claude Code) — La red social: @, seguir y el perfil público
+
+**Quién:** Claude Opus 5 corriendo en Claude Code, para Federico Díaz Nemeth.
+
+**Qué cambié:**
+- `migrations/018_red_social.sql` — dos tablas nuevas, `perfiles_publicos` (el @ y lo que
+  el piloto eligió publicar) y `seguimientos` (seguidor, seguido, `pendiente`/`aceptado`),
+  con RLS explícito por operación. **Ya aplicada en Supabase** (`apply_migration`,
+  nombre `red_social`).
+- `src/services/social.py` — puro: `validar_handle`, `relacion_con`, `puede_ver_horas`,
+  `estadisticas_publicas` y `limpiar_busqueda`.
+- `src/models/social.py` — entradas y salidas. Ningún `user_id` entra ni sale.
+- `src/controllers/social.py` — `/perfil-publico` (el @ propio), `/pilotos` (buscar y
+  seguir), `/social` (resumen, solicitudes, seguidores, siguiendo) y
+  `/publico/pilotos/{handle}` **sin guard**.
+- `src/app.py` — registra los cuatro controladores.
+- `test_social.py` (45 checks) y su paso en `ci.yml`.
+
+**Por qué:** Federico definió la red así: general, lo público son las horas, seguir directo
+a un público y con solicitud a un privado, URLs `/u/handle` y perfiles públicos por
+defecto que se ven sin cuenta.
+
+- **Tablas nuevas y no columnas en `profiles`**, porque buscar exige leer el @ de otros
+  y `profiles` tiene que seguir siendo "cada uno ve lo suyo": ahí están el WhatsApp, la
+  API key y Jeppesen.
+- **Las horas no se guardan en ninguna tabla pública.** El perfil las calcula al
+  servirse, con service role, **después** de decidir con `puede_ver_horas`, y sólo salen
+  los cinco agregados. `COLUMNAS_VUELO` ni siquiera pide fecha ni ruta.
+- **Las definiciones copian las del frontend** (`headlineStats`, `openingTotals`,
+  `soloVolados`): sin simuladores y con las horas de apertura. Si un perfil mostrara un
+  total distinto del Resumen del propio piloto, no se creería ninguno.
+- **El RLS repite la regla del código.** Un `insert` `aceptado` hacia un privado lo
+  rechaza la política. Y `update` en `seguimientos` quedó restringido por columnas a
+  `estado` y `aceptado_at`: con permiso sobre la fila entera, el seguido podía
+  reescribir `seguidor` y fabricarse seguidores.
+- **Descartado:** calcular las horas en el Next con los helpers de TS y que el backend
+  le pase las filas. Ahorraba la duplicación, pero obligaba a un endpoint que devuelve
+  vuelos crudos, protegido sólo por un secreto compartido. Prefiero duplicar cinco
+  sumas testeadas a tener ese endpoint.
+- **El perfil público crea un cliente de service role por consulta**, en vez de
+  compartir uno entre los hilos del `gather`: `/dashboard` ya mostró que un cliente
+  compartido pierde consultas en silencio.
+
+**Estado:** Terminado. Lo consume el frontend 2.19.0.
+
+**Verificación:**
+- `python test_social.py` (45 ✅), `test_audit_engine.py`, `test_models.py`,
+  `import src.app` (11 rutas nuevas) y `ruff`.
+- La sintaxis de `COLUMNAS_VUELO` (`"IMC Pil"` entre comillas) se probó contra la base
+  con el cliente anónimo: parsea, y RLS no devuelve filas.
+- **El RLS, contra la base real, con 11 casos y sin dejar rastro.** Un bloque `DO`
+  simula pilotos autenticados con `request.jwt.claims` y `set local role`, y termina
+  con `raise exception` para que Postgres deshaga todo. Pasaron los 11:
+  - aceptado hacia un privado rechazado (42501), y solicitud a un privado aceptada;
+  - seguir directo a un público;
+  - seguir en nombre ajeno rechazado (42501), y autoaceptarse no toca filas;
+  - reescribir `seguidor` rechazado (42501), y el seguido puede aceptar;
+  - cada uno ve sólo sus seguimientos;
+  - el anónimo ve los perfiles y no los seguimientos, y no puede crear perfiles.
+
+  Después, las dos tablas en 0 filas. Los advisors de seguridad no marcan nada nuevo.

@@ -35,6 +35,11 @@ jobs:
       - name: Motor de auditoría
         run: python test_audit_engine.py
 
+      # Offline. El check que más importa es la matriz de `puede_ver_horas`: es la
+      # única línea entre un perfil privado y cualquiera que tenga el link.
+      - name: Red social
+        run: python test_social.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.

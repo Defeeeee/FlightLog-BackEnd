@@ -22,6 +22,12 @@ from src.controllers.audit import AuditController
 from src.controllers.documents import DocumentsController, DocumentAlertsController
 from src.controllers.charts import ChartsController
 from src.controllers.flight_briefings import FlightBriefingsController
+from src.controllers.social import (
+    PerfilPublicoController,
+    PerfilesPublicosController,
+    PilotosController,
+    SocialController,
+)
 from src.auth.security import AuthHandler
 from src.config import settings
 
@@ -77,7 +83,13 @@ api_router = Router(
         DocumentsController,
         DocumentAlertsController,
         FlightBriefingsController,
-        ChartsController
+        ChartsController,
+        # La red social. `PerfilesPublicosController` va sin guard: es el perfil que
+        # abre el link de /u/... sin cuenta. Ver `src/controllers/social.py`.
+        PerfilPublicoController,
+        PilotosController,
+        SocialController,
+        PerfilesPublicosController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)
