@@ -1034,3 +1034,84 @@ del arreglo completo de la red del frontend (entrada del 2026-09-23 en
 
 **Verificación:** `test_publicaciones.py` (46 ✅), `test_social.py`, `import src.app` y
 `ruff`. El frontend se probó contra un backend falso que reproduce este contrato.
+
+### 2026-09-23 13:15 UTC — Claude (Opus 5.5, vía Claude Code) — Libro de vuelo en papel, bloqueos, reportes, avisos push y deploy detrás del CI (2.21.0)
+
+**Quién:** Claude Opus 5.5 corriendo en Claude Code, para Federico Díaz Nemeth. Es la
+parte de backend de la 2.21.0 (entrada del 2026-09-23 13:14 UTC en
+`Vector-FrontEnd/docs/bitacora/2026-09.md`).
+
+**Qué cambié:**
+- `.github/workflows/deploy.yml` — el deploy corre por `workflow_run` cuando el CI de
+  `main` termina en verde, y hace `git reset --hard` **al commit que aprobó el CI**
+  (`head_sha`). Se mantiene `workflow_dispatch`.
+- `migrations/020_libro_anac.sql` — `aircraft.potencia_hp`,
+  `profiles.licencia_numero`, `profiles.legajo`, `logbooks.renglones_por_hoja`
+  (default 15, entre 5 y 40) y `flights.cierra_hoja` (default false).
+- `migrations/021_red_cuidado.sql`:
+  - tabla `bloqueos`, con RLS de lo propio;
+  - `me_bloqueo()` security definer;
+  - `puede_ver_autor`, la lectura de comentarios y el insert de seguimientos, que
+    miran el bloqueo en las dos direcciones;
+  - tabla `reportes`, que sólo se inserta: no tiene política de lectura;
+  - tabla `suscripciones_push`, con RLS de lo propio.
+- `src/models/*` — los campos nuevos. `FlightUpdate.cierra_hoja` es opcional, así un
+  PATCH que no lo manda no lo pisa.
+- `src/controllers/flights.py` — `solo_marcas_del_libro`: un PATCH que sólo cambia
+  `cierra_hoja` no re-sincroniza el cobro, ni la auditoría, ni los vencimientos.
+- `src/controllers/logbooks.py` — crear y editar aceptan `renglones_por_hoja`.
+- `src/controllers/social.py`:
+  - `POST/DELETE /pilotos/{h}/bloqueo` y `GET /social/bloqueados`;
+  - listas, sugeridos y el perfil público respetan el bloqueo (quien fue bloqueado ve
+    404);
+  - avisos al seguir y al aceptar.
+- `src/controllers/publicaciones.py` — aviso al autor por aplauso y por comentario (en
+  segundo plano), y la Actividad sin eventos de bloqueados.
+- `src/controllers/cuidado.py` (nuevo):
+  - `/push/clave`, `/push/suscripcion` y `/push/baja`;
+  - `POST /reportes`, con tope de 20 por día y aviso a `ADMINS_RED`.
+- `src/services/avisos.py` (nuevo) — el texto de cada aviso (`armar_aviso`, puro), el
+  envío con pywebpush, y el borrado de suscripciones muertas (404/410).
+- `src/config.py` — `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` y
+  `ADMINS_RED`. `requirements.txt` — `pywebpush`.
+- `test_publicaciones.py` y `test_models.py` — bloqueos, avisos, reportes, los campos
+  del libro y el PATCH que no recalcula el cobro.
+
+**Por qué:**
+- **Deploy detrás del CI:** hasta ahora el backend se desplegaba en cada push, pasara o
+  no el CI. Es la misma trampa que ya le costó once commits en rojo en producción al
+  frontend.
+- **`cierra_hoja` no recalcula el cobro:** `_sync_flight_transaction` usa el
+  `cost_per_hour` de hoy. Marcar una hoja reescribía lo que se cobró el día del vuelo.
+  Editar el vuelo completo sigue recalculando, como antes, y no se tocó.
+- **Bloqueo en el RLS y no sólo en el controlador:** así una consulta nueva no puede
+  olvidarse de filtrarlo. `me_bloqueo` es security definer porque el bloqueado no puede
+  leer la fila que lo bloquea, y no debe poder.
+- **Reportes sin lectura:** los revisa quien administra, directo en la base. Una
+  pantalla de moderación, con 6 cuentas, no se justifica.
+- **Avisos en un hilo aparte**, y sin claves no se manda nada: un aviso que no llega es
+  mejor que un aplauso que falla.
+- Las fuentes normativas del libro están en
+  `Vector-FrontEnd/docs/normativa/libro-de-vuelo-anac.md`: RAAC 61.120 (VI edición) y
+  Res. ANAC 470/2025.
+
+**Estado:** terminado en código. **Orden de despliegue**:
+
+1. aplicar la 020 y la 021 **antes** del deploy, porque los modelos ya mandan las
+   columnas nuevas: un alta de vuelo sin la 020 fallaría;
+2. generar las claves VAPID y poner `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y
+   `ADMINS_RED` (el user id de Federico) en el `.env` del VPS.
+
+Sin el paso 2 todo anda, pero sin avisos.
+
+**Verificación:**
+- `test_social.py`, `test_publicaciones.py`, `test_models.py` (8 ✅),
+  `import src.app` y `ruff --select=E9,F`.
+- El RLS de la 021, contra la base, en un bloque `DO` que termina en error: todo se
+  deshizo, 22 de 22 casos OK.
+- La 020 completa, también en un bloque que termina en error, y sin rastros después:
+  - el libro existente quedó con 15 renglones;
+  - los 51 vuelos, sin cerrar hoja;
+  - rechazó 3 renglones por hoja.
+- El frontend se probó contra un backend falso con este contrato.
+- **Sin verificar:** el envío real de un push, que necesita las claves.

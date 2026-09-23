@@ -15,7 +15,7 @@ Ninguna fila de `flights`, y ningún `user_id`, cruza esta API.
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from litestar import Controller, Request, delete, get, post, put
 from litestar.exceptions import HTTPException, NotFoundException
@@ -46,6 +46,7 @@ from src.services.social import (
     url_avatar,
     validar_handle,
 )
+from src.services.avisos import armar_aviso, enviar_aviso
 from src.supabase_client import SupabaseManager, verify_access_token
 
 _COLUMNAS_PERFIL = "user_id, handle, nombre_visible, licencia, bio, visibilidad, avatar_path, created_at"
@@ -102,6 +103,25 @@ def _mis_estados(client: Client, yo: str, user_ids: List[str]) -> Dict[str, str]
     return {fila["seguido"]: fila["estado"] for fila in (r.data or [])}
 
 
+def _bloqueos(yo: Optional[str]) -> Tuple[Set[str], Set[str]]:
+    """
+    A quiénes bloqueé y quiénes me bloquearon (migración 021).
+
+    Con el service role: la segunda lista el RLS no me la deja leer —el bloqueado no puede
+    averiguar quién lo bloqueó— y acá se usa sólo para no mostrarme a quien me bloqueó.
+    """
+    if not yo:
+        return set(), set()
+    filas = (
+        SupabaseManager.get_service_client().table("bloqueos").select("bloqueador, bloqueado")
+        .or_(f"bloqueador.eq.{yo},bloqueado.eq.{yo}").execute().data
+        or []
+    )
+    bloquee = {f["bloqueado"] for f in filas if f["bloqueador"] == yo}
+    me_bloquearon = {f["bloqueador"] for f in filas if f["bloqueado"] == yo}
+    return bloquee, me_bloquearon
+
+
 def _avatar(fila: Dict[str, Any]) -> Optional[str]:
     return url_avatar(settings.supabase_url, fila.get("avatar_path"))
 
@@ -112,17 +132,23 @@ def _salida(fila: Dict[str, Any]) -> PerfilPublicoOut:
 
 
 def _resumenes(client: Client, yo: str, filas: List[Dict[str, Any]]) -> List[PilotoResumen]:
+    """
+    Una fila por piloto, con mi relación con cada uno. **Quien me bloqueó no aparece**:
+    para mí no existe. A quien bloqueé sí, como `bloqueado`, para poder desbloquearlo.
+    """
     estados = _mis_estados(client, yo, [f["user_id"] for f in filas])
+    bloquee, me_bloquearon = _bloqueos(yo)
     return [
         PilotoResumen(
             handle=f["handle"],
             nombre_visible=f["nombre_visible"],
             licencia=f.get("licencia"),
             visibilidad=f["visibilidad"],
-            relacion=relacion_con(yo, f["user_id"], estados.get(f["user_id"])),
+            relacion="bloqueado" if f["user_id"] in bloquee else relacion_con(yo, f["user_id"], estados.get(f["user_id"])),
             avatar_url=_avatar(f),
         )
         for f in filas
+        if f["user_id"] not in me_bloquearon
     ]
 
 
@@ -277,7 +303,8 @@ class PilotosController(Controller):
                     supabase_client.table("seguimientos").select("seguido").eq("seguidor", yo).execute().data or []
                 )
             ]
-            fuera = [yo, *seguidos]
+            bloquee, me_bloquearon = _bloqueos(yo)
+            fuera = [yo, *seguidos, *bloquee, *me_bloquearon]
             r = (
                 supabase_client.table("perfiles_publicos").select(_COLUMNAS_PERFIL)
                 .eq("visibilidad", "publico").not_.in_("user_id", fuera)
@@ -297,7 +324,8 @@ class PilotosController(Controller):
         h = _handle_o_404(handle)
 
         def _seguir() -> str:
-            if not _perfil_de(supabase_client, yo):
+            mio = _perfil_de(supabase_client, yo)
+            if not mio:
                 raise HTTPException(
                     status_code=409,
                     detail="Creá tu @ en el Hangar para seguir a otros pilotos.",
@@ -305,6 +333,11 @@ class PilotosController(Controller):
             destino = _destino(supabase_client, h)
             if destino["user_id"] == yo:
                 raise HTTPException(status_code=400, detail="No podés seguirte a vos mismo.")
+            bloquee, me_bloquearon = _bloqueos(yo)
+            if destino["user_id"] in me_bloquearon:
+                raise NotFoundException(_NO_EXISTE)
+            if destino["user_id"] in bloquee:
+                raise HTTPException(status_code=409, detail=f"Primero desbloqueá a @{destino['handle']}.")
 
             previo = _mis_estados(supabase_client, yo, [destino["user_id"]]).get(destino["user_id"])
             if previo:
@@ -321,6 +354,11 @@ class PilotosController(Controller):
                 if exc.code != "23505":
                     raise
                 return _mis_estados(supabase_client, yo, [destino["user_id"]]).get(destino["user_id"], estado)
+            # Sólo con la fila nueva: un doble toque no avisa dos veces.
+            enviar_aviso(
+                destino["user_id"],
+                armar_aviso("seguidor" if estado == "aceptado" else "solicitud", mio["nombre_visible"]),
+            )
             return estado
 
         estado = await asyncio.to_thread(_seguir)
@@ -340,6 +378,47 @@ class PilotosController(Controller):
             )
 
         await asyncio.to_thread(_borrar)
+        return EstadoSeguimiento(relacion="ninguna")
+
+    @post("/{handle:str}/bloqueo", status_code=200)
+    async def bloquear(self, request: Request, supabase_client: Client, handle: str) -> EstadoSeguimiento:
+        """
+        Bloquear: ninguno de los dos ve lo del otro, y se cortan los seguimientos en las
+        dos direcciones. El otro no se entera: para él, este perfil deja de existir. Ver
+        la migración 021.
+        """
+        yo = _yo(request)
+        h = _handle_o_404(handle)
+
+        def _bloquear() -> None:
+            if not _perfil_de(supabase_client, yo):
+                raise HTTPException(status_code=409, detail="Creá tu @ para usar la red.")
+            destino = _destino(supabase_client, h)
+            if destino["user_id"] == yo:
+                raise HTTPException(status_code=400, detail="No podés bloquearte a vos mismo.")
+            try:
+                supabase_client.table("bloqueos").insert({"bloqueador": yo, "bloqueado": destino["user_id"]}).execute()
+            except APIError as exc:
+                if exc.code != "23505":  # ya estaba bloqueado: doble toque
+                    raise
+            tabla = supabase_client.table("seguimientos")
+            tabla.delete().eq("seguidor", yo).eq("seguido", destino["user_id"]).execute()
+            supabase_client.table("seguimientos").delete().eq("seguidor", destino["user_id"]).eq("seguido", yo).execute()
+
+        await asyncio.to_thread(_bloquear)
+        return EstadoSeguimiento(relacion="bloqueado")
+
+    @delete("/{handle:str}/bloqueo", status_code=200)
+    async def desbloquear(self, request: Request, supabase_client: Client, handle: str) -> EstadoSeguimiento:
+        """Desbloquear no devuelve los seguimientos: si se quieren, se vuelven a pedir."""
+        yo = _yo(request)
+        h = _handle_o_404(handle)
+
+        def _desbloquear() -> None:
+            destino = _destino(supabase_client, h)
+            supabase_client.table("bloqueos").delete().eq("bloqueador", yo).eq("bloqueado", destino["user_id"]).execute()
+
+        await asyncio.to_thread(_desbloquear)
         return EstadoSeguimiento(relacion="ninguna")
 
 
@@ -395,6 +474,22 @@ class SocialController(Controller):
         yo = _yo(request)
         return await asyncio.to_thread(self._lista, supabase_client, yo, "seguidor", "seguido", None)
 
+    @get("/bloqueados")
+    async def bloqueados(self, request: Request, supabase_client: Client) -> List[PilotoResumen]:
+        """A quiénes bloqueé, para poder desbloquearlos desde el Hangar."""
+        yo = _yo(request)
+
+        def _leer() -> List[PilotoResumen]:
+            ids = [
+                f["bloqueado"]
+                for f in (
+                    supabase_client.table("bloqueos").select("bloqueado").eq("bloqueador", yo).execute().data or []
+                )
+            ]
+            return _resumenes(supabase_client, yo, _perfiles_de(supabase_client, ids))
+
+        return await asyncio.to_thread(_leer)
+
     @post("/solicitudes/{handle:str}/aceptar", status_code=200)
     async def aceptar(self, request: Request, supabase_client: Client, handle: str) -> Dict[str, bool]:
         yo = _yo(request)
@@ -410,6 +505,12 @@ class SocialController(Controller):
             )
             if not r.data:
                 raise NotFoundException("Esa solicitud ya no está.")
+            mio = _perfil_de(supabase_client, yo)
+            if mio:
+                enviar_aviso(
+                    quien["user_id"],
+                    armar_aviso("aceptada", mio["nombre_visible"], url=f"/dashboard/pilotos/{mio['handle']}"),
+                )
 
         await asyncio.to_thread(_aceptar)
         return {"ok": True}
@@ -480,6 +581,12 @@ class PerfilesPublicosController(Controller):
             raise NotFoundException(_NO_EXISTE)
         pid = perfil["user_id"]
 
+        # Para quien fue bloqueado, este perfil no existe: el mismo 404 que un @ que no
+        # está, así no se entera. Quien bloqueó lo ve, sin horas, para desbloquear.
+        bloquee, me_bloquearon = await asyncio.to_thread(_bloqueos, viewer)
+        if pid in me_bloquearon:
+            raise NotFoundException(_NO_EXISTE)
+
         def _contar(columna: str) -> int:
             r = (
                 SupabaseManager.get_service_client().table("seguimientos")
@@ -502,7 +609,7 @@ class PerfilesPublicosController(Controller):
             asyncio.to_thread(_contar, "seguidor"),
             asyncio.to_thread(_estado_del_que_mira),
         )
-        relacion = relacion_con(viewer, pid, estado)
+        relacion = "bloqueado" if pid in bloquee else relacion_con(viewer, pid, estado)
 
         horas: Optional[HorasPublicas] = None
         # Primero se decide, después se consulta. Sin permiso, las horas de este

@@ -66,6 +66,10 @@ class Logbook(BaseModel):
     opening_imc_cop: float = 0
     opening_capota: float = 0
 
+    #: Renglones por hoja del libro de papel, para cortar el PDF donde corta el libro
+    #: (migración 020). La hoja del Adjunto A de la Res. ANAC 147/2013 tiene 15.
+    renglones_por_hoja: int = 15
+
     #: How many flights point at this logbook. Computed, not stored — the UI
     #: needs it to warn before a delete.
     flight_count: Optional[int] = None
@@ -77,9 +81,11 @@ class LogbookCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: Optional[str] = None
     opening: Optional[OpeningBalance] = None
+    renglones_por_hoja: Optional[int] = Field(default=None, ge=5, le=40)
 
 
 class LogbookUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     description: Optional[str] = None
     opening: Optional[OpeningBalance] = None
+    renglones_por_hoja: Optional[int] = Field(default=None, ge=5, le=40)

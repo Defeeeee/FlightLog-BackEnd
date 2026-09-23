@@ -1,7 +1,17 @@
 name: Deploy
 
+# **Se despliega cuando el CI de `main` pasa, no cuando llega el push.**
+#
+# Hasta el 2026-09-23 el deploy corría en cada push, en paralelo con el CI y sin
+# mirarlo: un commit con los tests en rojo llegaba a producción igual (ese día pasó con
+# 1f6a318, que se desplegó antes de que terminaran sus tests). Es el mismo cambio que
+# se le hizo al frontend el día anterior, después de once commits en rojo desplegados.
+#
+# `workflow_dispatch` sigue para desplegar a mano sin esperar otra corrida del CI.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -13,6 +23,13 @@ concurrency:
 
 jobs:
   desplegar:
+    # Sólo el CI de un push a `main` que terminó en verde. Uno cancelado —porque llegó
+    # otro push— no despliega: lo hace la corrida nueva.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
       - name: Desplegar por SSH
@@ -29,7 +46,11 @@ jobs:
             # Para volver si el health check falla.
             ANTERIOR=$(git rev-parse HEAD)
             git fetch origin main
-            git reset --hard origin/main
+            # El commit que aprobó el CI, no "lo último de main": un push que llegó
+            # mientras corría todavía no pasó por el CI. Desde `workflow_dispatch`, lo
+            # último.
+            DESTINO="${{ github.event.workflow_run.head_sha || 'origin/main' }}"
+            git reset --hard "$DESTINO"
 
             # SERVER_SETUP.md dice ./venv y en otras máquinas es .venv. Se
             # detecta en vez de asumirse: un deploy que instala con el intérprete

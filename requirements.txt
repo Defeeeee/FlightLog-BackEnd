@@ -6,3 +6,4 @@ python-dotenv>=1.0.0
 uvicorn>=0.23.0
 msgspec>=0.18.0
 Pillow>=11,<13  # re-codificar las fotos de la red: sin EXIF ni ubicación (ver services/imagenes.py)
+pywebpush>=2.0,<3  # avisos push de la red, con VAPID (ver services/avisos.py)

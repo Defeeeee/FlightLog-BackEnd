@@ -95,11 +95,14 @@ def relacion_con(viewer_id: Optional[str], perfil_id: str, estado_seguimiento: O
 
 def puede_ver_horas(visibilidad: str, relacion: str) -> bool:
     """
-    El dueño y sus seguidores aceptados, siempre. El resto, sólo si es público.
+    El dueño y sus seguidores aceptados, siempre. El resto, sólo si es público. Nunca a
+    quien bloqueé: de un bloqueo, ninguno de los dos ve lo del otro.
 
     Cualquier `visibilidad` que no sea exactamente 'publico' cuenta como privada: ante
     un valor raro, esconder es el lado correcto del error.
     """
+    if relacion == "bloqueado":
+        return False
     if relacion in ("propio", "siguiendo"):
         return True
     return visibilidad == "publico"

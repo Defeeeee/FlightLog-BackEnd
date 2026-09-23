@@ -77,6 +77,8 @@ class LogbooksController(Controller):
             "description": data.description,
             **_opening_to_columns(data.opening),
         }
+        if data.renglones_por_hoja is not None:
+            insert["renglones_por_hoja"] = data.renglones_por_hoja
 
         # The first logbook a pilot creates becomes the default, so that the
         # flight form has something to preselect without asking.
@@ -99,6 +101,8 @@ class LogbooksController(Controller):
             update["name"] = data.name
         if data.description is not None:
             update["description"] = data.description
+        if data.renglones_por_hoja is not None:
+            update["renglones_por_hoja"] = data.renglones_por_hoja
         update.update(_opening_to_columns(data.opening))
 
         if not update:

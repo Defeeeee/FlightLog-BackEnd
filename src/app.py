@@ -28,6 +28,7 @@ from src.controllers.social import (
     PilotosController,
     SocialController,
 )
+from src.controllers.cuidado import PushController, ReportesController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -102,6 +103,9 @@ api_router = Router(
         PublicacionesController,
         RedController,
         PublicacionesPublicasController,
+        # Cuidar la red: avisos push y reportes. Ver `src/controllers/cuidado.py`.
+        PushController,
+        ReportesController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

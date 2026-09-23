@@ -32,7 +32,7 @@ from supabase import Client
 from src.auth.guards import auth_guard
 from src.auth.security import AuthHandler
 from src.config import settings
-from src.controllers.social import _handle_o_404, _perfil_de, _perfil_por_handle, _yo
+from src.controllers.social import _bloqueos, _handle_o_404, _perfil_de, _perfil_por_handle, _yo
 from src.models.social import (
     Actividad,
     AutorOut,
@@ -47,6 +47,7 @@ from src.models.social import (
     PublicacionOut,
     VueloChip,
 )
+from src.services.avisos import armar_aviso, en_segundo_plano, enviar_ahora
 from src.services.firmas import CacheDeFirmas
 from src.services.imagenes import ImagenInvalida, procesar_avatar, procesar_foto
 from src.services.social import (
@@ -127,6 +128,29 @@ def _borrar_archivos(bucket: str, paths: List[str]) -> None:
         _storage(bucket).remove(paths)
     except Exception as exc:  # noqa: BLE001
         print(f"[storage] no se pudieron borrar {len(paths)} archivos de {bucket}: {exc!r}")
+
+
+def _avisar_al_autor(token: str, yo: str, publicacion_id: str, tipo: str, texto: Optional[str] = None) -> None:
+    """
+    Avisarle al autor de una publicación que alguien la aplaudió o la comentó.
+
+    Todo en segundo plano —quién es el autor, cómo me llamo, mandar el aviso—: el aplauso
+    o el comentario ya se guardaron, y nada de esto puede demorarlos. A uno mismo no se
+    le avisa.
+    """
+
+    def _avisar() -> None:
+        cliente = _fabrica(token)()
+        filas = cliente.table("publicaciones").select("autor, texto").eq("id", publicacion_id).limit(1).execute().data
+        if not filas or filas[0]["autor"] == yo:
+            return
+        mio = _perfil_de(cliente, yo)
+        if not mio:
+            return
+        detalle = texto if tipo == "comentario" else filas[0].get("texto")
+        enviar_ahora(filas[0]["autor"], armar_aviso(tipo, mio["nombre_visible"], texto=detalle))
+
+    en_segundo_plano(_avisar)
 
 
 # ---------------------------------------------------------------------------
@@ -439,9 +463,10 @@ class PublicacionesController(Controller):
             if poner:
                 try:
                     tabla.insert({"publicacion_id": pid, "user_id": yo}).execute()
+                    _avisar_al_autor(token, yo, pid, "aplauso")
                 except APIError as exc:
                     if exc.code == "23505":
-                        pass  # Ya estaba: doble toque.
+                        pass  # Ya estaba: doble toque, y no se avisa dos veces.
                     elif exc.code == "23503":
                         raise HTTPException(status_code=409, detail=_SIN_HANDLE) from exc
                     elif exc.code == "42501":
@@ -485,6 +510,7 @@ class PublicacionesController(Controller):
                 if exc.code in ("42501", "23503"):
                     raise NotFoundException("Esa publicación ya no está.") from exc
                 raise
+            _avisar_al_autor(token, yo, str(publicacion_id), "comentario", fila["texto"])
             return ComentarioOut(
                 id=fila["id"], autor=_autor(mio), texto=fila["texto"], created_at=fila["created_at"], puede_borrar=True
             )
@@ -637,6 +663,14 @@ class RedController(Controller):
             )
 
         aplausos, comentarios = await _en_paralelo(_aplausos, _comentarios)
+
+        # Lo de quien bloqueé, o de quien me bloqueó, no aparece: de un bloqueo, ninguno de
+        # los dos ve lo del otro (migración 021). Lo viejo, de antes del bloqueo, tampoco.
+        bloquee, me_bloquearon = await asyncio.to_thread(_bloqueos, yo)
+        fuera = bloquee | me_bloquearon
+        seguimientos = [s for s in seguimientos if s["seguidor"] not in fuera]
+        aplausos = [a for a in aplausos if a["user_id"] not in fuera]
+        comentarios = [c for c in comentarios if c["autor"] not in fuera]
 
         quienes = {s["seguidor"] for s in seguimientos} | {a["user_id"] for a in aplausos} | {c["autor"] for c in comentarios}
 

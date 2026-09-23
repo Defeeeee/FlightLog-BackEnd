@@ -7,7 +7,9 @@ from pydantic import BaseModel, field_validator
 from src.services.social import validar_handle
 
 Visibilidad = Literal["publico", "privado"]
-Relacion = Literal["anonimo", "propio", "siguiendo", "pendiente", "ninguna"]
+#: `bloqueado` es "vos lo bloqueaste". El que fue bloqueado nunca lo ve: para él, el
+#: perfil de quien lo bloqueó no existe (404).
+Relacion = Literal["anonimo", "propio", "siguiendo", "pendiente", "ninguna", "bloqueado"]
 
 
 def _texto_opcional(valor: Optional[str]) -> Optional[str]:
@@ -234,3 +236,69 @@ class MiComentario(BaseModel):
     publicacion_id: UUID
     texto: str
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Cuidar la red: reportes y avisos push
+# ---------------------------------------------------------------------------
+
+TipoReporte = Literal["perfil", "publicacion", "comentario"]
+
+
+class ReporteIn(BaseModel):
+    """
+    Qué se reporta y por qué. `objetivo` es el @ de un perfil o el id de una
+    publicación o comentario: nunca un user_id.
+    """
+
+    tipo: TipoReporte
+    objetivo: str
+    motivo: str
+
+    @field_validator("objetivo")
+    @classmethod
+    def _objetivo(cls, valor: str) -> str:
+        limpio = (valor or "").strip()
+        if not limpio or len(limpio) > 100:
+            raise ValueError("No sabemos qué querés reportar.")
+        return limpio
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo(cls, valor: str) -> str:
+        limpio = (valor or "").strip()
+        if not limpio:
+            raise ValueError("Contanos el motivo del reporte.")
+        if len(limpio) > 500:
+            raise ValueError("El motivo puede tener como mucho 500 caracteres.")
+        return limpio
+
+
+class ClavesPush(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class SuscripcionPushIn(BaseModel):
+    """Lo que devuelve `PushManager.subscribe()` en el navegador, tal cual."""
+
+    endpoint: str
+    keys: ClavesPush
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint(cls, valor: str) -> str:
+        if not valor.startswith("https://") or len(valor) > 1000:
+            raise ValueError("Suscripción inválida.")
+        return valor
+
+
+class BajaPushIn(BaseModel):
+    endpoint: str
+
+
+class ClavePush(BaseModel):
+    """La clave pública VAPID, o `None` si los avisos no están configurados."""
+
+    clave: Optional[str] = None
+

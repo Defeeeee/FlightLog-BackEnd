@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from uuid import UUID
 
@@ -16,6 +16,9 @@ class Aircraft(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    #: Caballos de fuerza; la total si es multimotor. La pide la hoja del libro de
+    #: vuelo de ANAC (Res. 147/2013). Opcional: en blanco, se completa a mano.
+    potencia_hp: Optional[int] = Field(default=None, gt=0, le=100000)
     #: `true` = dispositivo de entrenamiento, no aeronave.
     #:
     #: El piloto anota el simulador en el libro como cualquier vuelo —fecha, horarios,
@@ -41,6 +44,9 @@ class AircraftCreate(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    #: Caballos de fuerza; la total si es multimotor. La pide la hoja del libro de
+    #: vuelo de ANAC (Res. 147/2013). Opcional: en blanco, se completa a mano.
+    potencia_hp: Optional[int] = Field(default=None, gt=0, le=100000)
     #: `true` = dispositivo de entrenamiento, no aeronave.
     #:
     #: El piloto anota el simulador en el libro como cualquier vuelo —fecha, horarios,
@@ -64,4 +70,7 @@ class AircraftUpdate(BaseModel):
     cruise_tas_kt: Optional[float] = None
     fuel_burn_lph: Optional[float] = None
     fuel_capacity_l: Optional[float] = None
+    #: Caballos de fuerza; la total si es multimotor. La pide la hoja del libro de
+    #: vuelo de ANAC (Res. 147/2013). Opcional: en blanco, se completa a mano.
+    potencia_hp: Optional[int] = Field(default=None, gt=0, le=100000)
     is_simulator: Optional[bool] = None

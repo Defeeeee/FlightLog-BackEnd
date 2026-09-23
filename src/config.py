@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     # criterio que `documents_alert_secret`.
     jeppesen_charts_dir: Optional[str] = Field(default=None, validation_alias="JEPPESEN_CHARTS_DIR")
 
+    # Avisos push de la red (web push con VAPID). La clave pública se le da al
+    # navegador para suscribirse; la privada firma cada aviso. Sin las dos, los avisos
+    # quedan apagados —`services/avisos.py` no manda nada— en vez de romper lo demás.
+    vapid_public_key: Optional[str] = Field(default=None, validation_alias="VAPID_PUBLIC_KEY")
+    vapid_private_key: Optional[str] = Field(default=None, validation_alias="VAPID_PRIVATE_KEY")
+    vapid_subject: str = Field(default="mailto:fdiaznemeth@gmail.com", validation_alias="VAPID_SUBJECT")
+
+    # Quién recibe el aviso de un reporte nuevo: user_ids separados por coma. Vacío,
+    # los reportes se guardan igual y se revisan en la tabla `reportes`.
+    admins_red: Optional[str] = Field(default=None, validation_alias="ADMINS_RED")
+
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
     google_client_secret: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")

@@ -106,6 +106,50 @@ def test_borrar_un_horario_sigue_siendo_mandar_null():
     assert "takeoff_time" not in deja
 
 
+def test_el_libro_acepta_los_renglones_de_la_hoja_y_rechaza_lo_absurdo():
+    """Migración 020: el PDF corta la hoja donde la corta el libro de papel."""
+    from pydantic import ValidationError
+
+    from src.models.logbook import LogbookCreate, LogbookUpdate
+
+    assert LogbookCreate(name="Libro", renglones_por_hoja=12).renglones_por_hoja == 12
+    assert LogbookUpdate().renglones_por_hoja is None  # sin tocar, no se cambia
+    for malo in (0, 4, 41):
+        try:
+            LogbookUpdate(renglones_por_hoja=malo)
+        except ValidationError:
+            continue
+        raise AssertionError(f"aceptó {malo} renglones por hoja")
+
+
+def test_cerrar_la_hoja_es_opcional_y_el_patch_no_lo_pisa():
+    """Un vuelo nuevo no cierra la hoja; editar otro campo no toca la marca."""
+    from datetime import datetime, timezone
+
+    from src.models.flight import FlightCreate, FlightUpdate
+
+    hora = datetime(2026, 9, 23, 13, 5, tzinfo=timezone.utc)
+    nuevo = FlightCreate(date="2026-09-23", route="SADF SADF", landings=4, duration=1.2, takeoff=hora, landing=hora)
+    assert nuevo.cierra_hoja is False
+    assert "cierra_hoja" not in FlightUpdate(route="SADF SAAR").model_dump(exclude_unset=True)
+    assert FlightUpdate(cierra_hoja=True).model_dump(exclude_unset=True) == {"cierra_hoja": True}
+
+
+
+def test_marcar_cerrar_hoja_no_recalcula_el_cobro():
+    """
+    Un PATCH que sólo marca "cerrar hoja" no re-sincroniza el cobro: lo recalcularía
+    con el precio por hora de hoy. Cualquier otro cambio, sí (vive en el controlador,
+    pero es una función pura).
+    """
+    from src.controllers.flights import solo_marcas_del_libro
+
+    assert solo_marcas_del_libro({"cierra_hoja": True})
+    assert not solo_marcas_del_libro({"cierra_hoja": True, "duration": 1.2})
+    assert not solo_marcas_del_libro({"route": "SADF SAAR"})
+    assert not solo_marcas_del_libro({})
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

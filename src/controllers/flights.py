@@ -1,11 +1,21 @@
 from litestar import Controller, get, post, patch, delete, Request
 from litestar.exceptions import NotFoundException
 from supabase import Client
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 from src.models.flight import Flight, FlightCreate, FlightUpdate
 from src.auth.guards import auth_guard
 from src.services import audit_engine, derived_expiries
+
+#: Lo que un vuelo guarda sólo para el libro en papel (migración 020): cambiarlo no
+#: toca el cobro, la auditoría ni los vencimientos derivados.
+MARCAS_DEL_LIBRO = frozenset({"cierra_hoja"})
+
+
+def solo_marcas_del_libro(cambios: Dict[str, Any]) -> bool:
+    """Si un PATCH sólo cambia marcas del libro, y entonces no hay nada que recalcular."""
+    return bool(cambios) and set(cambios) <= MARCAS_DEL_LIBRO
+
 
 class FlightsController(Controller):
     path = "/flights"
@@ -227,6 +237,12 @@ class FlightsController(Controller):
         if not response.data:
             raise NotFoundException(f"Flight with ID {flight_id} not found or permission denied")
         flight_obj = Flight(**response.data[0])
+
+        # Marcar "cerrar hoja" no cambia ni el cobro, ni la auditoría, ni los
+        # vencimientos. Y re-sincronizar el cobro lo recalcularía con el precio por
+        # hora de hoy, reescribiendo lo que se cobró el día del vuelo.
+        if solo_marcas_del_libro(update_data):
+            return flight_obj
 
         await self._sync_flight_transaction(
             user_id=str(flight_obj.user_id),

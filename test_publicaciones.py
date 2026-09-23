@@ -13,7 +13,8 @@ from io import BytesIO
 
 from PIL import Image
 
-from src.services import firmas, imagenes, social
+from src.models.social import PilotoResumen, ReporteIn, SuscripcionPushIn
+from src.services import avisos, firmas, imagenes, social
 
 
 def check(label, condition):
@@ -183,6 +184,51 @@ def main() -> bool:
     except ValueError:
         margen_invalido = True
     ok &= check("un margen igual a la duración se rechaza", margen_invalido)
+
+    # ------------------------------------------------------------ bloqueos
+    ok &= check("a quien bloqueé no le veo las horas, aunque sea público",
+                social.puede_ver_horas("publico", "bloqueado") is False)
+    ok &= check("sin bloqueo, lo público se sigue viendo", social.puede_ver_horas("publico", "ninguna") is True)
+    ok &= check("'bloqueado' es una relación válida para la salida",
+                PilotoResumen(handle="x.y", nombre_visible="X", visibilidad="publico", relacion="bloqueado").relacion
+                == "bloqueado")
+
+    # ------------------------------------------------------------ avisos push
+    a = avisos.armar_aviso("aplauso", "Juan Alumno", texto="Mi primer solo, con viento cruzado en la final")
+    ok &= check("el aviso de un aplauso dice quién y sobre qué",
+                a["titulo"] == "Juan Alumno aplaudió tu publicación" and a["cuerpo"].startswith("Mi primer solo"))
+    ok &= check("los avisos de un tipo se reemplazan entre sí (misma etiqueta)", a["etiqueta"] == "vector-aplauso")
+    c = avisos.armar_aviso("comentario", "Ana", texto="x" * 300)
+    ok &= check("un comentario largo se corta", len(c["cuerpo"]) <= 120 and c["cuerpo"].endswith("…"))
+    ok &= check("una solicitud lleva a la Actividad",
+                avisos.armar_aviso("solicitud", "Ana")["url"] == "/dashboard/pilotos/actividad")
+    ok &= check("aceptar lleva al perfil del que aceptó",
+                avisos.armar_aviso("aceptada", "Ana", url="/dashboard/pilotos/ana.p")["url"] == "/dashboard/pilotos/ana.p")
+    ok &= check("sin nombre, 'Un piloto'", avisos.armar_aviso("seguidor", "  ")["titulo"] == "Un piloto empezó a seguirte")
+    try:
+        avisos.armar_aviso("otra-cosa", "Ana")
+        tipo_raro = False
+    except ValueError:
+        tipo_raro = True
+    ok &= check("un tipo de aviso desconocido es un error, no un aviso vacío", tipo_raro)
+    ok &= check("404 y 410 son suscripciones muertas",
+                avisos.es_suscripcion_muerta(404) and avisos.es_suscripcion_muerta(410)
+                and not avisos.es_suscripcion_muerta(500) and not avisos.es_suscripcion_muerta(None))
+
+    def invalido(modelo, **datos):
+        try:
+            modelo(**datos)
+        except ValueError:
+            return True
+        return False
+
+    ok &= check("un reporte sin motivo no", invalido(ReporteIn, tipo="perfil", objetivo="x.y", motivo="  "))
+    ok &= check("un reporte de un tipo que no existe no", invalido(ReporteIn, tipo="vuelo", objetivo="x", motivo="spam"))
+    ok &= check("un motivo de más de 500 no", invalido(ReporteIn, tipo="perfil", objetivo="x.y", motivo="m" * 501))
+    ok &= check("un reporte bien armado se limpia",
+                ReporteIn(tipo="comentario", objetivo=" abc ", motivo=" spam ").motivo == "spam")
+    ok &= check("una suscripción que no es https no",
+                invalido(SuscripcionPushIn, endpoint="http://x", keys={"p256dh": "a", "auth": "b"}))
 
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))
     return bool(ok)

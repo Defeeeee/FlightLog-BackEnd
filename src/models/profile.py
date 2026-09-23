@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from uuid import UUID
 
@@ -10,6 +10,10 @@ class Profile(BaseModel):
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
     whatsapp_phone: Optional[str] = None
+    #: Para el encabezado de la hoja del libro de vuelo de ANAC (Res. 147/2013):
+    #: el número de la licencia y el legajo que asigna Licencias al Personal.
+    licencia_numero: Optional[str] = Field(default=None, max_length=30)
+    legajo: Optional[str] = Field(default=None, max_length=30)
     #: Ver migración 016. A propósito ausente de `ProfileUpdate`: no es un campo
     #: que el piloto pueda tocar de sí mismo.
     jeppesen_access: bool = False
@@ -23,6 +27,10 @@ class ProfileCreate(BaseModel):
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
     whatsapp_phone: Optional[str] = None
+    #: Para el encabezado de la hoja del libro de vuelo de ANAC (Res. 147/2013):
+    #: el número de la licencia y el legajo que asigna Licencias al Personal.
+    licencia_numero: Optional[str] = Field(default=None, max_length=30)
+    legajo: Optional[str] = Field(default=None, max_length=30)
 
 class ProfileUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -31,3 +39,7 @@ class ProfileUpdate(BaseModel):
     tracking_mode: Optional[str] = None
     api_key: Optional[UUID] = None
     whatsapp_phone: Optional[str] = None
+    #: Para el encabezado de la hoja del libro de vuelo de ANAC (Res. 147/2013):
+    #: el número de la licencia y el legajo que asigna Licencias al Personal.
+    licencia_numero: Optional[str] = Field(default=None, max_length=30)
+    legajo: Optional[str] = Field(default=None, max_length=30)
