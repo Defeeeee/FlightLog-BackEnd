@@ -1176,3 +1176,27 @@ macOS con adaptadores para `base64 -w0` y `sed -i` de GNU:
 - con un `.env` que no carga: sale con error y deja el `.env` idéntico al de antes.
 
 La validación rechaza `x; rm -rf ~`, `|` y vacío.
+
+### 2026-09-23 13:48 UTC — Claude (Opus 5.5, vía Claude Code) — Avisos push configurados en el VPS
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico.
+
+**Qué hice:**
+- Corrí "Configurar avisos push" con el user id de Federico en `admins`: clave nueva en
+  `~/.config/vector/vapid_private.pem` y copia del `.env`
+  (`.env.antes-avisos-20260923134552`).
+- Después, el Deploy manual: reinició `cbca6e0` con health OK.
+
+**Por qué:** es el paso que faltaba de la 2.21.0 (ver las entradas anteriores).
+
+**Estado:** terminado. Los avisos se ofrecen en la app desde este reinicio.
+
+**Verificación:**
+- Por SSH:
+  - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `ADMINS_RED` en el `.env`;
+  - PEM en 600;
+  - `flightlog-7477` arrancó a las 13:46:24 UTC, después del cambio del `.env`
+    (13:45:52);
+  - sin errores en el log.
+- **Sin verificar:** un aviso de punta a punta. Todavía no hay suscripciones, y la
+  primera la tiene que hacer Federico desde su teléfono.
