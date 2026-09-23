@@ -19,7 +19,6 @@ import logging
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
-from src.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +29,20 @@ TTL_SEGUNDOS = 24 * 60 * 60
 ACTIVIDAD = "/dashboard/pilotos/actividad"
 
 
+def _settings():
+    """
+    La configuración, recién cuando hace falta. Importada arriba, cargar este módulo
+    exigía el `.env` completo, y lo puro de acá (`armar_aviso`, `es_suscripcion_muerta`)
+    no se podía testear sin él: el CI no tiene `.env`.
+    """
+    from src.config import settings
+
+    return settings
+
+
 def avisos_configurados() -> bool:
-    return bool(settings.vapid_public_key and settings.vapid_private_key)
+    s = _settings()
+    return bool(s.vapid_public_key and s.vapid_private_key)
 
 
 def _recortar(texto: Optional[str], largo: int) -> str:
@@ -112,8 +123,8 @@ def enviar_ahora(user_id: str, aviso: Dict[str, str]) -> None:
             webpush(
                 subscription_info={"endpoint": s["endpoint"], "keys": {"p256dh": s["p256dh"], "auth": s["auth"]}},
                 data=datos,
-                vapid_private_key=settings.vapid_private_key,
-                vapid_claims={"sub": settings.vapid_subject},
+                vapid_private_key=_settings().vapid_private_key,
+                vapid_claims={"sub": _settings().vapid_subject},
                 ttl=TTL_SEGUNDOS,
             )
         except WebPushException as exc:
@@ -149,4 +160,4 @@ def enviar_aviso(user_id: Optional[str], aviso: Dict[str, str]) -> None:
 
 
 def admins() -> List[str]:
-    return [a.strip() for a in (settings.admins_red or "").split(",") if a.strip()]
+    return [a.strip() for a in (_settings().admins_red or "").split(",") if a.strip()]

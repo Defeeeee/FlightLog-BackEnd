@@ -1115,3 +1115,28 @@ Sin el paso 2 todo anda, pero sin avisos.
   - rechazó 3 renglones por hoja.
 - El frontend se probó contra un backend falso con este contrato.
 - **Sin verificar:** el envío real de un push, que necesita las claves.
+
+### 2026-09-23 13:31 UTC — Claude (Opus 5.5, vía Claude Code) — El CI sin `.env`: `avisos.py` cargaba la configuración al importarse
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico, desplegando la 2.21.0.
+
+**Qué cambié:**
+- `src/services/avisos.py` — `settings` se importa recién cuando hace falta
+  (`_settings()`), no al cargar el módulo.
+
+**Por qué:** el primer push de la 2.21.0 (`80cee3d`) rompió el paso "Publicaciones y
+fotos" del CI. `test_publicaciones.py` importa `avisos` para probar `armar_aviso`, y el
+import cargaba `Settings()`, que exige `SUPABASE_URL`. En mi máquina pasaba porque
+hay `.env`; en el CI no hay.
+
+Descartado: sumarle las variables de mentira a ese paso de `ci.yml`, como tiene
+"Modelos". Taparía que un módulo de funciones puras depende de la configuración para
+cargarse.
+
+El deploy nuevo cumplió su función: con el CI en rojo, **no se desplegó nada**.
+
+**Estado:** terminado.
+
+**Verificación:** todos los pasos de `ci.yml` en una copia limpia del repo, sin
+`.env` y con las mismas variables que da el CI: import, auditoría, red social,
+publicaciones, modelos, cartas y ruff.
