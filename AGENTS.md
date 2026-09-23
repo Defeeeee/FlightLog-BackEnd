@@ -1140,3 +1140,39 @@ El deploy nuevo cumplió su función: con el CI en rojo, **no se desplegó nada*
 **Verificación:** todos los pasos de `ci.yml` en una copia limpia del repo, sin
 `.env` y con las mismas variables que da el CI: import, auditoría, red social,
 publicaciones, modelos, cartas y ruff.
+
+### 2026-09-23 13:44 UTC — Claude (Opus 5.5, vía Claude Code) — Configurar los avisos push desde Actions
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico ("hacé todo lo que necesites").
+
+**Qué cambié:**
+- `.github/workflows/configurar-avisos.yml` (nuevo, manual) — por el mismo SSH del
+  Deploy:
+  - genera las claves VAPID **en el VPS** (`~/.config/vector/vapid_private.pem`, 600);
+  - hace una copia del `.env`;
+  - pone `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (la ruta al PEM) y `ADMINS_RED`;
+  - comprueba que el backend lo lea.
+
+  No reinicia: eso lo hace el Deploy manual, con health check y rollback.
+
+**Por qué:**
+- Las claves tenían que estar en el `.env` del backend, y SSH desde el Mac depende de
+  Tailscale, que figuraba abierto pero sin conectar. El Deploy ya entra al VPS con
+  secretos del repo: esto usa ese camino y deja el procedimiento escrito y repetible.
+- **La privada nunca sale del VPS.** La alternativa de guardarla como secreto de GitHub
+  la habría copiado a un lugar más.
+- **Idempotente:** si la clave existe, se reusa. Rotarla invalida todas las
+  suscripciones, así que no se hace sin querer.
+- **Si la verificación falla, restaura el `.env`:** un `.env` roto tiraría el backend
+  en el próximo deploy.
+- **La entrada se valida** (sólo UUIDs separados por coma) antes de tocar el VPS.
+
+**Estado:** terminado. Falta correrlo con el user id de Federico y después el Deploy.
+
+**Verificación:** el script, idéntico al del workflow (se comparó con `diff`), corrió en
+macOS con adaptadores para `base64 -w0` y `sed -i` de GNU:
+- en limpio: genera la clave, agrega las 3 variables y el backend las lee;
+- la segunda vez: reusa la clave y no duplica líneas;
+- con un `.env` que no carga: sale con error y deja el `.env` idéntico al de antes.
+
+La validación rechaza `x; rm -rf ~`, `|` y vacío.

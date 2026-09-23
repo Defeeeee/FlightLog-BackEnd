@@ -1,0 +1,100 @@
+name: Configurar avisos push
+
+# Deja listos los avisos push en el VPS: genera las claves VAPID **allá** —la privada
+# nunca sale del VPS: ni a GitHub, ni a los logs— y pone en el `.env` del backend
+# `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` (la ruta al PEM, que pywebpush acepta) y
+# `ADMINS_RED`, quiénes reciben el aviso de cada reporte.
+#
+# - **Idempotente.** Si la clave ya existe, se reusa. Regenerarla dejaría inservibles
+#   todas las suscripciones de los navegadores, así que este workflow no lo hace nunca:
+#   para rotarla hay que borrar el PEM a mano, a sabiendas.
+# - **No reinicia.** El backend lee el `.env` al arrancar: después de esto se corre el
+#   Deploy a mano (`workflow_dispatch`), que reinicia con health check y rollback.
+# - **Si la verificación falla, el `.env` vuelve a como estaba**: un `.env` roto tiraría
+#   el backend en el próximo reinicio.
+#
+# Existe porque la otra vía, SSH desde el Mac, depende de que Tailscale esté conectado.
+on:
+  workflow_dispatch:
+    inputs:
+      admins:
+        description: "User ids que reciben los reportes, separados por coma"
+        required: true
+        type: string
+
+# El mismo grupo que el Deploy: nunca tocan el VPS a la vez.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  configurar:
+    runs-on: ubuntu-latest
+    steps:
+      # UUIDs separados por coma y nada más: el valor termina escrito en el `.env`.
+      - name: Validar la entrada
+        env:
+          ADMINS: ${{ inputs.admins }}
+        run: |
+          UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+          echo "$ADMINS" | grep -Eqx "${UUID}(,${UUID})*" || { echo "ADMINS no son user ids"; exit 1; }
+
+      - name: Claves y .env en el VPS
+        uses: appleboy/ssh-action@v1
+        env:
+          ADMINS: ${{ inputs.admins }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: ADMINS
+          script_stop: true
+          script: |
+            set -euo pipefail
+            umask 077
+
+            DIR="$HOME/.config/vector"
+            PEM="$DIR/vapid_private.pem"
+            mkdir -p "$DIR"
+            chmod 700 "$DIR"
+            if [ -f "$PEM" ]; then
+              echo "La clave ya existía: se reusa."
+            else
+              openssl ecparam -name prime256v1 -genkey -noout -out "$PEM"
+              echo "Clave nueva generada."
+            fi
+            chmod 600 "$PEM"
+
+            # La pública, como la pide el navegador: el punto sin comprimir (65 bytes) en
+            # base64url, sin relleno.
+            PUB=$(openssl ec -in "$PEM" -pubout -outform DER 2>/dev/null | tail -c 65 | base64 -w0 | tr '/+' '_-' | tr -d '=')
+            if [ "${#PUB}" -ne 87 ]; then echo "La clave pública no tiene el largo esperado"; exit 1; fi
+
+            cd ~/FlightLog-BackEnd
+            COPIA=".env.antes-avisos-$(date -u +%Y%m%d%H%M%S)"
+            # La copia hereda el umask: 600, como el original.
+            cp .env "$COPIA"
+            # Si algo falla de acá en adelante, el .env vuelve a como estaba: un .env roto tiraría
+            # el backend en el próximo reinicio.
+            trap 'echo "Falló: se restaura el .env"; cp "$COPIA" .env' ERR
+
+            # Que el archivo termine en salto de línea antes de agregar nada.
+            [ -z "$(tail -c1 .env)" ] || echo >> .env
+            poner() {
+              # `|` como separador: ni la clave (base64url), ni la ruta, ni los ids lo tienen.
+              if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi
+            }
+            poner VAPID_PUBLIC_KEY "$PUB"
+            poner VAPID_PRIVATE_KEY "$PEM"
+            poner ADMINS_RED "$ADMINS"
+
+            # Que el backend lo lea como corresponde, sin mostrar nada secreto.
+            if   [ -x venv/bin/python ];  then PY=venv/bin/python
+            elif [ -x .venv/bin/python ]; then PY=.venv/bin/python
+            else echo "No encuentro el virtualenv"; false
+            fi
+            $PY -c "from py_vapid import Vapid; from src.config import settings; from src.services.avisos import admins, avisos_configurados; Vapid.from_file(private_key_file=settings.vapid_private_key); assert avisos_configurados(); print('Avisos configurados; admins:', len(admins()))"
+
+            trap - ERR
+            echo "Clave pública: $PUB"
+            echo "Falta reiniciar: correr el Deploy a mano."
