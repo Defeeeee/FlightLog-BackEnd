@@ -13,7 +13,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from src.services import imagenes, social
+from src.services import firmas, imagenes, social
 
 
 def check(label, condition):
@@ -145,6 +145,44 @@ def main() -> bool:
                 social.url_avatar("https://x.supabase.co/", "abc.webp")
                 == "https://x.supabase.co/storage/v1/object/public/avatares/abc.webp")
     ok &= check("sin avatar, sin URL", social.url_avatar("https://x.supabase.co", None) is None)
+
+    # ------------------------------------------------------------ firmas estables
+    # La misma foto tiene que salir con la misma URL mientras le quede vida: si cambia
+    # en cada pedido, el navegador la baja de nuevo cada vez que se dibuja la Red.
+    reloj = {"t": 1000.0}
+    pedidos = []
+
+    def firmar(paths):
+        pedidos.append(list(paths))
+        return {p: f"https://x/{p}?t={reloj['t']}" for p in paths if p != "roto.webp"}
+
+    cache = firmas.CacheDeFirmas(firmar, duracion=600, margen=200, maximo=4, reloj=lambda: reloj["t"])
+    primera = cache.urls(["a.webp", "b.webp"])
+    reloj["t"] += 300  # le quedan 300 s: más que el margen
+    segunda = cache.urls(["b.webp", "a.webp"])
+    ok &= check("una firma con vida se reusa: misma URL, sin pedir de nuevo",
+                primera == segunda and len(pedidos) == 1)
+    cache.urls(["a.webp", "c.webp"])
+    ok &= check("sólo se firma lo que falta", pedidos[-1] == ["c.webp"])
+    reloj["t"] += 150  # a `a` le quedan 150 s: menos que el margen
+    tercera = cache.urls(["a.webp"])
+    ok &= check("cerca de vencer, se firma de nuevo", tercera["a.webp"] != primera["a.webp"] and pedidos[-1] == ["a.webp"])
+    cache.urls(["roto.webp"])
+    cache.urls(["roto.webp"])
+    ok &= check("lo que no se pudo firmar no queda recordado", pedidos[-2:] == [["roto.webp"], ["roto.webp"]])
+    ok &= check("los paths repetidos o vacíos se piden una vez",
+                list(cache.urls(["d.webp", "d.webp", ""])) == ["d.webp"] and pedidos[-1] == ["d.webp"])
+    cache.olvidar(["d.webp"])
+    cache.urls(["d.webp"])
+    ok &= check("una foto borrada se olvida", pedidos[-1] == ["d.webp"])
+    cache.urls(["e.webp", "f.webp", "g.webp"])
+    ok &= check("pasado el máximo, el cache no crece sin límite", len(cache._cache) <= 4)
+    try:
+        firmas.CacheDeFirmas(firmar, duracion=100, margen=100)
+        margen_invalido = False
+    except ValueError:
+        margen_invalido = True
+    ok &= check("un margen igual a la duración se rechaza", margen_invalido)
 
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))
     return bool(ok)

@@ -993,3 +993,44 @@ aprobado por él.
 - Los `select` con embebidos (`aplausos(count)`, las FK nombradas) se probaron contra la
   base con el anónimo. Los advisors no marcan nada nuevo.
 - **Falta:** la prueba del storage de punta a punta, que depende del deploy (Pillow).
+
+### 2026-09-23 01:05 UTC — Claude (Opus 5.5, vía Claude Code) — Firmas de fotos estables, comentarios propios para exportar, y un vuelo sin datos no se publica
+
+**Quién:** Claude Opus 5.5 corriendo en Claude Code, para Federico Díaz Nemeth, dentro
+del arreglo completo de la red del frontend (entrada del 2026-09-23 en
+`Vector-FrontEnd/docs/bitacora/2026-09.md`).
+
+**Qué cambié:**
+- `src/services/firmas.py` (nuevo) — `CacheDeFirmas`: reusa la URL firmada de cada foto
+  mientras le queden más de dos horas de las seis. Con lock, sin guardar lo que no se
+  pudo firmar, con tope de tamaño y `olvidar()` para lo que se borra.
+- `src/controllers/publicaciones.py`:
+  - `_firmar` pasa por el cache (`FIRMA_MARGEN_SEGUNDOS`), y borrar una publicación
+    olvida sus fotos;
+  - `GET /red/mis-comentarios`, para la exportación de datos;
+  - publicar un vuelo con todos los datos apagados, sin texto ni fotos, da 400: antes
+    salía una publicación vacía.
+- `src/models/social.py` — `MiComentario`.
+- `test_publicaciones.py` — 8 checks del cache (reuso, sólo lo que falta, re-firma
+  cerca del vencimiento, lo fallido no se recuerda, repetidos, olvidar, tope, margen
+  inválido).
+
+**Por qué:**
+- **Firmar en cada pedido anulaba el cache del navegador.** El token de una URL firmada
+  lleva adentro cuándo se firmó: dos firmas de la misma foto son dos URLs. Cada vez que
+  la Red se volvía a dibujar, el teléfono bajaba todas las fotos de nuevo, aunque los
+  objetos se suben con `cache-control` de un año y nunca cambian. Reusar la firma no
+  cambia quién ve qué: la URL se entrega recién después de que el RLS dejó pasar la fila,
+  igual que antes, y una URL firmada ya era un permiso al portador por seis horas. Lo
+  único que cambia es que una URL puede llegar con menos vida: nunca menos de dos horas.
+  Descartado: bucket público para las fotos de publicaciones, que se saltearía el RLS
+  para cualquiera que tenga el path.
+- **`mis-comentarios`**: la exportación tiene que incluir lo que el piloto escribió.
+  Sale con su cliente, así que el RLS de `comentarios` (que sigue al de la publicación)
+  decide: un comentario en una publicación que ya no puede ver no sale. Se documenta en
+  el `AGENTS.md` del frontend; agregar una política para eso no valía una migración.
+
+**Estado:** terminado.
+
+**Verificación:** `test_publicaciones.py` (46 ✅), `test_social.py`, `import src.app` y
+`ruff`. El frontend se probó contra un backend falso que reproduce este contrato.

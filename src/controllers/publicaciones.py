@@ -42,10 +42,12 @@ from src.models.social import (
     EstadoAplauso,
     EventoActividad,
     FotoOut,
+    MiComentario,
     PaginaPublicaciones,
     PublicacionOut,
     VueloChip,
 )
+from src.services.firmas import CacheDeFirmas
 from src.services.imagenes import ImagenInvalida, procesar_avatar, procesar_foto
 from src.services.social import (
     COMENTARIOS_POR_DIA,
@@ -64,6 +66,9 @@ BUCKET_AVATARES = "avatares"
 #: Lo que dura una URL firmada. Las páginas se piden sin cache, así que alcanza con que
 #: sobreviva a una pestaña abierta un rato largo.
 FIRMA_SEGUNDOS = 6 * 60 * 60
+#: La misma firma se reusa hasta que le queden dos horas: así la URL de una foto no
+#: cambia entre pedidos y el navegador la sirve de su cache. Ver `services/firmas.py`.
+FIRMA_MARGEN_SEGUNDOS = 2 * 60 * 60
 POR_PAGINA = 15
 
 _AUTOR = "handle, nombre_visible, licencia, avatar_path"
@@ -145,15 +150,20 @@ def _conteo(valor: Any) -> int:
     return 0
 
 
-def _firmar(paths: List[str]) -> Dict[str, str]:
-    if not paths:
-        return {}
+def _firmar_en_storage(paths: List[str]) -> Dict[str, str]:
     firmadas = _storage(BUCKET_FOTOS).create_signed_urls(paths, FIRMA_SEGUNDOS)
     return {
         f["path"]: f.get("signedURL") or f.get("signedUrl")
         for f in firmadas
         if f.get("path") and not f.get("error") and (f.get("signedURL") or f.get("signedUrl"))
     }
+
+
+_FIRMAS = CacheDeFirmas(_firmar_en_storage, duracion=FIRMA_SEGUNDOS, margen=FIRMA_MARGEN_SEGUNDOS)
+
+
+def _firmar(paths: List[str]) -> Dict[str, str]:
+    return _FIRMAS.urls(paths) if paths else {}
 
 
 def _armar(filas: List[Dict[str, Any]], viewer: Optional[str], cliente: Callable[[], Client]) -> List[PublicacionOut]:
@@ -349,6 +359,10 @@ class PublicacionesController(Controller):
                     r = cliente.table("aircraft").select("type").eq("id", vuelo[0]["aircraft_id"]).limit(1).execute()
                     avion = r.data[0] if r.data else None
                 chip = resumen_de_vuelo(vuelo[0], avion, **interruptores)
+                # Un vuelo con todos los datos apagados no muestra nada: sin texto ni
+                # fotos, la publicación saldría vacía.
+                if chip is None and not texto and not fotos:
+                    raise HTTPException(status_code=400, detail="Elegí al menos un dato del vuelo para mostrar.")
 
             if not texto and not fotos and not chip:
                 raise HTTPException(status_code=400, detail="Prendé al menos un dato del vuelo, o sumá texto o una foto.")
@@ -399,7 +413,9 @@ class PublicacionesController(Controller):
             r = cliente.table("publicaciones").delete().eq("id", str(publicacion_id)).eq("autor", yo).execute()
             if not r.data:
                 raise NotFoundException("Esa publicación ya no está.")
-            _borrar_archivos(BUCKET_FOTOS, [f["path"] for f in fotos])
+            paths = [f["path"] for f in fotos]
+            _FIRMAS.olvidar(paths)
+            _borrar_archivos(BUCKET_FOTOS, paths)
 
         await asyncio.to_thread(_borrar)
         return {"ok": True}
@@ -542,6 +558,28 @@ class RedController(Controller):
                 .eq("autor", yo).order("created_at", desc=True).limit(500).execute().data or []
             )
             return PaginaPublicaciones(publicaciones=_armar(filas, yo, fabrica), siguiente=None)
+
+        return await asyncio.to_thread(_leer)
+
+    @get("/mis-comentarios")
+    async def mis_comentarios(self, request: Request) -> List[MiComentario]:
+        """
+        Lo que comentaste, para la exportación de datos. Hasta 1000, sin paginar.
+
+        Sale con el cliente del piloto, así que el RLS de `comentarios` —que sigue al de
+        la publicación— decide: si el autor de una publicación te dejó de mostrar su
+        perfil, tus comentarios ahí tampoco salen. Es el mismo criterio que el resto de la
+        exportación: exactamente lo que tu sesión puede ver.
+        """
+        token = _token_o_401(request)
+        yo = _yo(request)
+
+        def _leer() -> List[MiComentario]:
+            filas = (
+                _fabrica(token)().table("comentarios").select("id, publicacion_id, texto, created_at")
+                .eq("autor", yo).order("created_at", desc=True).limit(1000).execute().data or []
+            )
+            return [MiComentario(**f) for f in filas]
 
         return await asyncio.to_thread(_leer)
 

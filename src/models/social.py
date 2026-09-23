@@ -225,3 +225,12 @@ class EventoActividad(BaseModel):
 
 class Actividad(BaseModel):
     eventos: List[EventoActividad]
+
+
+class MiComentario(BaseModel):
+    """Un comentario propio, para la exportación: sin el autor, que sos vos."""
+
+    id: UUID
+    publicacion_id: UUID
+    texto: str
+    created_at: datetime
