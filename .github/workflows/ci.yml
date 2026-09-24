@@ -50,6 +50,11 @@ jobs:
       - name: Estadísticas del panel
         run: python test_estadisticas.py
 
+      # Offline. A quién se le manda el mail del día siguiente al alta: una sola vez, sólo
+      # con el mail confirmado y sólo si todavía no cargó vuelos.
+      - name: Recordatorio del primer vuelo
+        run: python test_recordatorios.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.

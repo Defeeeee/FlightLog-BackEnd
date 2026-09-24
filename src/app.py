@@ -30,6 +30,7 @@ from src.controllers.social import (
 )
 from src.controllers.cuidado import PushController, ReportesController
 from src.controllers.admin import AdminController
+from src.controllers.onboarding import OnboardingController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -109,6 +110,8 @@ api_router = Router(
         ReportesController,
         # El panel de administración: sólo para ADMINS_RED, y 404 para el resto.
         AdminController,
+        # El recordatorio del día siguiente al alta: sin sesión, con el secreto de los barridos.
+        OnboardingController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

@@ -1229,3 +1229,31 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - `ruff check src/ --select=E9,F`: limpio.
 - `py_compile` de los archivos nuevos. `import src.app` lo corre el CI (localmente no está el venv).
 - **No se probó contra la base real** (`auth.admin.list_users` y el service role). Va a quedar probado cuando Federico abra el panel después del deploy.
+
+### 2026-09-24 11:30 UTC — Claude (Opus 5.5, vía Claude Code) — El recordatorio del día siguiente al alta: `/onboarding/recordatorios`
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico.
+
+**Qué hice:**
+- `src/services/recordatorios.py` (nuevo): a quién escribirle. Es puro.
+- `src/controllers/onboarding.py` (nuevo):
+  - `GET /onboarding/recordatorios?dia=` devuelve la lista;
+  - `POST /onboarding/recordatorios/enviados` marca a quiénes les llegó.
+
+  Los dos van con `X-Cron-Secret`, el mismo secreto de los barridos.
+- `src/app.py`: registra `OnboardingController`.
+- `test_recordatorios.py` (nuevo, 9 checks), y su paso en `ci.yml`.
+
+**Por qué:** los cuatro pilotos que entraron el 2026-09-23 no volvieron a entrar, y nada los traía de vuelta. El frontend (`/api/cron/primer-vuelo`) manda un mail al día siguiente del alta a quien no tenga vuelos. Mismo reparto que el briefing: acá se decide a quién, allá se manda.
+- **Uno o ninguno.** La marca va en el `app_metadata` de la cuenta de auth (`recordatorio_primer_vuelo`). Sólo el service role la escribe, no hace falta migración y el piloto no la puede tocar. Se lee y se mezcla antes de escribir, para no pisar `provider`/`providers`.
+- **Sólo al día siguiente** (hora argentina, como el panel). Un envío que falla no se reintenta otro día: el mail es uno o ninguno, y dos sería peor que ninguno.
+- **Sólo con el mail confirmado:** a una dirección que nadie verificó no se le escribe.
+- Se descartó usar sólo la ventana de fechas, sin marca. Es lo que tiene el briefing (ver su entrada): correrlo dos veces duplica los mails.
+
+**Estado:** hecho, sin desplegar hasta el OK de Federico. Falta la línea del crontab del VPS, que llama al frontend y no a esto.
+
+**Verificación:**
+- `python test_recordatorios.py`: 9 OK.
+- `test_estadisticas.py` sigue en 28 OK.
+- `ruff`: limpio.
+- **Sin probar contra auth real:** `update_user_by_id` con `app_metadata` y el `list_users` con `email_confirmed_at`.
