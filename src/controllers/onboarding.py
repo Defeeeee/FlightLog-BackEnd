@@ -146,12 +146,17 @@ class OnboardingEstadoController(Controller):
             r = supabase_client.table("profiles").select("license_type,whatsapp_phone").eq("id", uid).limit(1).execute()
             return (r.data or [{}])[0]
 
-        p, cma, aviones, libros, vuelos = await asyncio.gather(
+        def tiene_arroba() -> bool:
+            r = supabase_client.table("perfiles_publicos").select("user_id").eq("user_id", uid).limit(1).execute()
+            return bool(r.data)
+
+        p, cma, aviones, libros, vuelos, arroba = await asyncio.gather(
             asyncio.to_thread(perfil),
             asyncio.to_thread(lambda: contar("documents", kind="cma")),
             asyncio.to_thread(aviones_reales),
             asyncio.to_thread(lambda: contar("logbooks")),
             asyncio.to_thread(lambda: contar("flights")),
+            asyncio.to_thread(tiene_arroba),
         )
         return {
             "licencia": (p.get("license_type") or "-").strip() not in ("", "-"),
@@ -160,4 +165,6 @@ class OnboardingEstadoController(Controller):
             "libro": libros > 0,
             "vuelos": vuelos > 0,
             "whatsapp": bool(p.get("whatsapp_phone")),
+            # Desde el 2026-09-24 el @ es un paso obligatorio del alta.
+            "arroba": arroba,
         }

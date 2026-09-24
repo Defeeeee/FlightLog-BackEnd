@@ -621,8 +621,18 @@ class PerfilesPublicosController(Controller):
                     .eq("user_id", pid).execute().data or []
                 )
 
+            def _vuelos() -> List[Dict[str, Any]]:
+                # Las horas de alumno no cuentan una vez rendida la PPA (migración 022).
+                # Sin fecha —quien nunca fue alumno en Vector—, cuentan todas.
+                cliente = SupabaseManager.get_service_client()
+                ppa = (cliente.table("profiles").select("fecha_ppa").eq("id", pid).limit(1).execute().data or [{}])[0].get("fecha_ppa")
+                q = cliente.table("flights").select(COLUMNAS_VUELO).eq("user_id", pid)
+                if ppa:
+                    q = q.gte("date", ppa)
+                return q.execute().data or []
+
             flights, logbooks, aircraft = await asyncio.gather(
-                asyncio.to_thread(_filas, "flights", COLUMNAS_VUELO),
+                asyncio.to_thread(_vuelos),
                 asyncio.to_thread(_filas, "logbooks", COLUMNAS_LIBRO),
                 asyncio.to_thread(_filas, "aircraft", "id, is_simulator"),
             )

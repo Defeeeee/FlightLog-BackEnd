@@ -1269,3 +1269,21 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado; se despliega con el OK de Federico.
 
 **Verificación:** `ruff` y `py_compile`. Contra la base real, después del deploy.
+
+### 2026-09-24 12:20 UTC — Claude (Opus 5.5, vía Claude Code) — `fecha_ppa` (migración 022), el @ en el estado del alta, horas públicas desde la PPA
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico.
+
+**Qué hice:**
+- `migrations/022_fecha_ppa.sql`: `profiles.fecha_ppa date`, nullable y sin default.
+- `src/models/profile.py`: `fecha_ppa` en los tres modelos. Va como texto `YYYY-MM-DD`, validado con `pattern`: un `date` de Python no se serializa en el `update()` de supabase-py.
+- `src/controllers/onboarding.py`: `/onboarding/estado` suma `arroba`. El @ es un paso obligatorio del alta.
+- `src/controllers/social.py`: las horas del perfil público cuentan desde `fecha_ppa` si hay una.
+
+**Por qué:** Federico decidió que las horas de alumno no cuentan una vez rendida la PPA (ver la bitácora del frontend, con la salvedad de la RAAC). **Sin fecha no cambia nada:** nadie la tiene, y no se completa para nadie porque no hay forma de saberla. Una fecha inventada le borraría horas a alguien.
+
+**Estado:** terminado. La migración se aplica en producción antes de desplegar.
+
+**Verificación:**
+- `ruff` y `py_compile`.
+- `test_social.py` necesita el venv, así que lo corre el CI.
