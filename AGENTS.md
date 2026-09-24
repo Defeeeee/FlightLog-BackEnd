@@ -1287,3 +1287,29 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Verificación:**
 - `ruff` y `py_compile`.
 - `test_social.py` necesita el venv, así que lo corre el CI.
+
+### 2026-09-24 18:19 UTC — Claude (Opus 5.5, vía Claude Code) — El resumen del mes por mail: `/resumen-mensual`
+
+**Qué cambié:**
+- `src/services/resumen_mensual.py`: a quién le toca el resumen de un mes (mail confirmado, al menos un vuelo, sin baja y sin la marca de ese mes), y `mes_anterior`. Puro.
+- `src/controllers/resumen_mensual.py`: `GET /resumen-mensual/pendientes?mes=`, `POST /resumen-mensual/enviados` y `POST /resumen-mensual/baja`, con el secreto de los barridos.
+- `test_resumen_mensual.py` (13 checks) y su paso en `ci.yml`.
+- `src/app.py`: registra `ResumenMensualController`.
+
+**Por qué:**
+- Federico pidió un resumen del mes por mail. Mismo reparto que el recordatorio del alta: el backend dice a quién, y el frontend arma el mail y lo manda con Resend.
+- **`/pendientes` devuelve filas, no números.** Lo que falta para la PPA o la PCA, el gasto y el saldo ya se calculan en el frontend, con tests (`lib/pca-progress.ts`, `lib/ppa-progress.ts`, `lib/costos.ts`), y son los números que el piloto ve en el inicio. Calcularlos también acá en Python dejaría dos versiones de la RAAC 61 que pueden separarse.
+- Las marcas van en el `app_metadata` de auth, como la del recordatorio:
+  - `resumen_mensual` guarda el último mes mandado, así que correr el barrido dos veces no manda dos mails;
+  - `resumen_mensual_baja` es la baja.
+  - No hace falta migración, y el piloto no las puede tocar.
+- **La baja llega con el secreto de los barridos**, no con sesión: el frontend verifica el link firmado del mail (`lib/baja-mail.ts`) y recién ahí llama. Se descartó que el backend verificara la firma, porque serían dos lugares con el mismo secreto y el mismo formato.
+- **A quien no cargó nunca un vuelo no se le manda:** un resumen vacío no dice nada, y para eso está el mail del día siguiente al alta.
+
+**Estado:** terminado.
+
+**Verificación:**
+- `test_resumen_mensual.py`: 13/13.
+- `import src.app` levanta.
+- `ruff --select=E9,F` (la selección del CI) sin errores.
+- No probado contra la base: no se llamó a los endpoints en producción antes del deploy.
