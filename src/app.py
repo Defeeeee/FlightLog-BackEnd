@@ -29,6 +29,7 @@ from src.controllers.social import (
     SocialController,
 )
 from src.controllers.cuidado import PushController, ReportesController
+from src.controllers.admin import AdminController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -106,6 +107,8 @@ api_router = Router(
         # Cuidar la red: avisos push y reportes. Ver `src/controllers/cuidado.py`.
         PushController,
         ReportesController,
+        # El panel de administración: sólo para ADMINS_RED, y 404 para el resto.
+        AdminController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

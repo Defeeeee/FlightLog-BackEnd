@@ -1200,3 +1200,32 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
   - sin errores en el log.
 - **Sin verificar:** un aviso de punta a punta. Todavía no hay suscripciones, y la
   primera la tiene que hacer Federico desde su teléfono.
+
+### 2026-09-24 00:36 UTC — Claude (Opus 5.5, vía Claude Code) — Panel de administración: `GET /admin/estadisticas`
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico.
+
+**Qué hice:**
+- `src/services/estadisticas.py` (nuevo): arma el panel a partir de filas crudas. Es puro.
+- `src/controllers/admin.py` (nuevo): lee las tablas con el service role, en paralelo, y aplica `armar`.
+- `src/app.py`: registra `AdminController`.
+- `test_estadisticas.py` (nuevo, 28 checks), y su paso en `ci.yml`.
+
+**Por qué:** el 2026-09-23 Federico pasó Vector a un grupo de pilotos y entraron tres cuentas en una hora. Contarlas y ver hasta dónde llegó cada una exigía SQL a mano contra producción; ahora es una pantalla (`/dashboard/admin` en el frontend).
+- **Quién es admin:** los ids de `ADMINS_RED`, que ya estaba en el `.env` del VPS con el de Federico, para los avisos de reportes. Una variable nueva (`ADMINS`) sería más prolija, pero hoy son la misma persona y habría que tocar el VPS; si algún día difieren, se separan.
+- **A los demás les da 404, no 403:** que el panel exista tampoco es algo que un piloto tenga por qué saber.
+- **Con el service role, y por eso sólo agregados.** Las cuentas salen por su @ o como "sin @". Ningún mail, nombre ni teléfono sale del backend: de `profiles` viaja un booleano "tiene WhatsApp", no el número.
+- **Por defecto no se cuentan los admins.** Federico tiene casi todos los vuelos de la base, así que con él adentro "vuelos del mes" lo mide a él. `?incluir_admins=true` lo suma.
+- **Los días van en hora argentina, con UTC−3 fijo.** Las tres altas del 23 fueron entre las 19:57 y las 21:05, que en UTC ya son del 24. Se descartó `zoneinfo`: depende de `tzdata` en el VPS.
+- **Una tabla que falla no tira el panel.** Va a `no_disponible` y el frontend la nombra, porque "no sé" no es "no hay". Si fallan las cuentas, 503, porque todo se cuenta sobre ellas.
+- **Todo se lee de a mil** (`_todas`): PostgREST corta en 1000 filas sin avisar.
+- **Los vuelos van por fecha de vuelo:** `flights` no tiene `created_at`.
+- **Se descartó una función SQL** (una sola consulta): exigía una migración, y en Python las cuentas se testean offline como el resto de los servicios. Con el volumen de hoy la diferencia no se nota; si la base crece, conviene moverlo a SQL.
+
+**Estado:** terminado, sin desplegar hasta el OK de Federico.
+
+**Verificación:**
+- `python test_estadisticas.py`: 28 OK.
+- `ruff check src/ --select=E9,F`: limpio.
+- `py_compile` de los archivos nuevos. `import src.app` lo corre el CI (localmente no está el venv).
+- **No se probó contra la base real** (`auth.admin.list_users` y el service role). Va a quedar probado cuando Federico abra el panel después del deploy.

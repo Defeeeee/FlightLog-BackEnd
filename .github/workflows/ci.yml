@@ -45,6 +45,11 @@ jobs:
       - name: Publicaciones y fotos
         run: python test_publicaciones.py
 
+      # Offline. El panel de administración: los días en hora argentina, que el admin
+      # no infle los números y que de las últimas altas no salga más que el @.
+      - name: Estadísticas del panel
+        run: python test_estadisticas.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.
