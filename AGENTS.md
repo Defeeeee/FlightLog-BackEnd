@@ -1313,3 +1313,35 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - `import src.app` levanta.
 - `ruff --select=E9,F` (la selección del CI) sin errores.
 - No probado contra la base: no se llamó a los endpoints en producción antes del deploy.
+
+### 2026-09-24 21:43 UTC — Claude (Opus 5.5, vía Claude Code) — Supabase a sa-east-1: proyecto `jkmcdbihjqkgizekzlun`
+
+**Qué cambié:**
+- Proyecto Supabase nuevo **"Vector SA" (`jkmcdbihjqkgizekzlun`, sa-east-1)**, con la estructura, los datos y la configuración de storage del viejo.
+- `.env` del VPS (no está en git): `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` y `GOOGLE_CALLBACK_URL` apuntan al nuevo. Respaldo en `.env.antes-sa-east-1-20260924212235`.
+- `.gemini/settings.json`: el MCP de Supabase apunta al proyecto nuevo.
+- El proyecto viejo (`ssvzjrafixbycydhigwv`, us-east-1) quedó **pausado**. SignIT se pausó durante la migración y se reactivó: el plan gratis admite dos proyectos activos.
+
+**Por qué:**
+- El VPS está en São Paulo y la base estaba en Virginia: ~150 ms de red en cada consulta, el piso de latencia de toda pantalla (ver las entradas de agosto sobre `/dashboard`). Federico decidió hacerlo hoy.
+- **Supabase no muda proyectos de región:** hay que crear uno nuevo y copiar. Se descartó la herramienta del panel ("restore to new project"), que no existe en el plan gratis.
+- **Se copiaron `auth.sessions` y `auth.refresh_tokens`:** las sesiones abiertas se renuevan contra el proyecto nuevo, así que no hace falta volver a iniciar sesión. Las contraseñas viajan con `auth.users`.
+
+**Cómo:**
+- Durante el corte, la página de mantenimiento con 503 (`~/mantenimiento` y un router de Traefik de prioridad 1000; los dos se sacaron) y el backend frenado (`pm2 stop`).
+- `pg_dump` 18: el esquema `public` más los datos de `auth` (sin `schema_migrations`), `public` y `storage.buckets`, cargados en una transacción con `session_replication_role = replica`.
+- A mano: los triggers `on_auth_user_created` y `profiles_user_delete_cascade` sobre `auth.users`, que no están en `public`, y el job `purge-old-whatsapp-chats` de `pg_cron`.
+- **Trampa de permisos:** el proyecto nuevo da permisos por defecto a `anon` y `authenticated`, y el volcado no los quita.
+  - Quedaron abiertas `handle_new_user`, `handle_deleted_user` y `purge_old_whatsapp_chats`, y `UPDATE` en toda `seguimientos`.
+  - Al revocar el `UPDATE` de la tabla, Postgres se llevó también el de las columnas `estado` y `aceptado_at`, que hubo que volver a dar.
+  - El `UPDATE` de más en `seguimientos` estuvo abierto de 21:36 a 21:45 UTC, siempre limitado por el RLS.
+
+**Estado:** terminado. El proyecto viejo sigue pausado como respaldo. Si en unos días no aparece nada raro, se puede borrar.
+
+**Verificación:**
+- Mismo conteo de filas en las 49 tablas copiadas, y el mismo md5 del contenido de `flights`, `profiles`, `transactions`, `documents`, `aircraft` y `auth.users` (con los hashes de las contraseñas).
+- Mismos permisos (tablas, funciones, columnas), RLS y políticas: comparados con `diff` entre las dos bases.
+- La service_role en el backend: `/resumen-mensual/pendientes` y `auth.admin`. El cliente anónimo: `/publico/pilotos/{handle}`.
+- El smoke del CI con sesión, re-corrido contra producción: 73 rutas OK.
+- Latencia desde el VPS: red 1,3 ms (antes ~150), consulta REST con la conexión reutilizada 70-85 ms (antes 155-180).
+- **Sin verificar:** el login con Google, que depende de la configuración del panel y de Google Cloud que hizo Federico.
