@@ -30,7 +30,7 @@ from src.controllers.social import (
 )
 from src.controllers.cuidado import PushController, ReportesController
 from src.controllers.admin import AdminController
-from src.controllers.onboarding import OnboardingController
+from src.controllers.onboarding import OnboardingController, OnboardingEstadoController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -112,6 +112,8 @@ api_router = Router(
         AdminController,
         # El recordatorio del día siguiente al alta: sin sesión, con el secreto de los barridos.
         OnboardingController,
+        # El estado del alta del piloto que pregunta: con sesión.
+        OnboardingEstadoController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

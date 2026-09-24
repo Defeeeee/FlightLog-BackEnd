@@ -1257,3 +1257,15 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - `test_estadisticas.py` sigue en 28 OK.
 - `ruff`: limpio.
 - **Sin probar contra auth real:** `update_user_by_id` con `app_metadata` y el `list_users` con `email_confirmed_at`.
+
+### 2026-09-24 11:37 UTC — Claude (Opus 5.5, vía Claude Code) — `GET /onboarding/estado`: el alta obligatoria y retomable
+
+**Quién:** Claude Opus 5.5 en Claude Code, para Federico.
+
+**Qué hice:** en `src/controllers/onboarding.py` agregué `OnboardingEstadoController`, con sesión, y lo registré en `src/app.py`. Devuelve `licencia`, `cma`, `aeronave`, `libro`, `vuelos` y `whatsapp` del piloto que pregunta.
+
+**Por qué:** Federico decidió que el alta sea obligatoria y retome donde quedó (ver la bitácora del frontend). El paso se calcula con los datos para que cuente lo cargado por fuera del alta. Va con el cliente del piloto (RLS) y con conteos (`count="exact"`, `limit(1)`), para no traer los vuelos. La aeronave cuenta si `is_simulator` es false **o NULL**.
+
+**Estado:** terminado; se despliega con el OK de Federico.
+
+**Verificación:** `ruff` y `py_compile`. Contra la base real, después del deploy.

@@ -21,6 +21,9 @@ from typing import Any, Dict, List, Optional
 from litestar import Controller, Request, get, post
 from litestar.exceptions import NotAuthorizedException
 from pydantic import BaseModel, Field
+from supabase import Client
+
+from src.auth.guards import auth_guard
 
 from src.config import settings
 from src.controllers.admin import _todas
@@ -103,3 +106,58 @@ class OnboardingController(Controller):
             return n
 
         return {"marcados": await asyncio.to_thread(_marcar)}
+
+
+class OnboardingEstadoController(Controller):
+    """
+    `GET /onboarding/estado`: qué pasos del alta tiene hechos el piloto que pregunta.
+
+    Desde el 2026-09-24 el alta es obligatoria y **retoma donde quedó** (decisión de
+    Federico): el frontend bloquea el dashboard hasta completarla y arranca en el primer
+    paso sin hacer. Por eso se calcula con los datos, no con una marca: si alguien cargó
+    el avión desde el Hangar, el paso 2 ya está.
+
+    Con el cliente del piloto (RLS) y sólo conteos: un piloto con 500 vuelos no trae 500
+    filas para saber si tiene uno.
+    """
+
+    path = "/onboarding/estado"
+    guards = [auth_guard]
+
+    @get()
+    async def estado(self, request: Request, supabase_client: Client) -> Dict[str, bool]:
+        uid = str(request.state.user.id)
+
+        def contar(tabla: str, **filtros: Any) -> int:
+            q = supabase_client.table(tabla).select("id", count="exact").eq("user_id", uid)
+            for k, v in filtros.items():
+                q = q.eq(k, v)
+            return int(q.limit(1).execute().count or 0)
+
+        def aviones_reales() -> int:
+            # `is_simulator` puede ser NULL en aeronaves viejas, y `= false` no las cuenta.
+            q = (
+                supabase_client.table("aircraft").select("id", count="exact").eq("user_id", uid)
+                .or_("is_simulator.is.null,is_simulator.eq.false")
+            )
+            return int(q.limit(1).execute().count or 0)
+
+        def perfil() -> Dict[str, Any]:
+            r = supabase_client.table("profiles").select("license_type,whatsapp_phone").eq("id", uid).limit(1).execute()
+            return (r.data or [{}])[0]
+
+        p, cma, aviones, libros, vuelos = await asyncio.gather(
+            asyncio.to_thread(perfil),
+            asyncio.to_thread(lambda: contar("documents", kind="cma")),
+            asyncio.to_thread(aviones_reales),
+            asyncio.to_thread(lambda: contar("logbooks")),
+            asyncio.to_thread(lambda: contar("flights")),
+        )
+        return {
+            "licencia": (p.get("license_type") or "-").strip() not in ("", "-"),
+            "cma": cma > 0,
+            "aeronave": aviones > 0,
+            "libro": libros > 0,
+            "vuelos": vuelos > 0,
+            "whatsapp": bool(p.get("whatsapp_phone")),
+        }
