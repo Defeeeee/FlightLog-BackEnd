@@ -1345,3 +1345,23 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - El smoke del CI con sesión, re-corrido contra producción: 73 rutas OK.
 - Latencia desde el VPS: red 1,3 ms (antes ~150), consulta REST con la conexión reutilizada 70-85 ms (antes 155-180).
 - **Sin verificar:** el login con Google, que depende de la configuración del panel y de Google Cloud que hizo Federico.
+
+### 2026-09-30 22:25 UTC — Claude (Opus 5.5, vía Claude Code) — El recordatorio del alta: reintento y ventana de tres días
+
+**Qué cambié:**
+- `src/controllers/onboarding.py`: `_listar_con_reintento` reintenta `list_users` hasta 3 veces (esperando 2 y 4 s) si Supabase no contesta a tiempo. `/onboarding/recordatorios` suma `ventana` (por defecto 3, tope 14) y pasa `hoy`.
+- `src/services/recordatorios.py`: elige las altas de los `ventana` días hasta `dia`, y devuelve `dias_desde_el_alta`, contados desde hoy.
+- `test_recordatorios.py`: 15 checks (la ventana, sus bordes y los días contados desde hoy).
+
+**Por qué:**
+- Cuatro altas (24/09 16:26 y 18:46, 25/09 01:48 y 14:07, en hora argentina) nunca recibieron el recordatorio.
+- El log del cron dice `502` el 25 y el 26/09 a las 13:00 UTC, y el del backend dice `httpx.ReadTimeout` en `list_users` las dos veces.
+- Como el barrido sólo miraba "ayer", una corrida caída perdía esas altas para siempre.
+- **La ventana cura las corridas perdidas** (la marca evita mandar dos veces), y **el reintento evita perderlas** cuando es un hipo de Supabase. `list_users` es una lectura: reintentar no tiene efectos.
+- Se descartó subir el timeout del cliente de auth: no se sabe cuánto duró el cuelgue, y un timeout largo frena la corrida entera en vez de reintentar.
+- `dias_desde_el_alta` se cuenta desde hoy, y no desde `dia`, para que una corrida manual con un `dia` viejo no diga "ayer".
+- `_usuarios_completos` también la usa el resumen del mes, que gana el mismo reintento.
+
+**Estado:** terminado. Las cuatro altas perdidas tienen entre 5 y 6 días; mandarles el mail ahora es decisión de Federico.
+
+**Verificación:** `test_recordatorios.py` 15/15, `test_resumen_mensual.py` 13/13, `ruff --select=E9,F` y `import src.app`. **No probado** contra un timeout real.

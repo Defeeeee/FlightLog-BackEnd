@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import httpx
 from litestar import Controller, Request, get, post
 from litestar.exceptions import NotAuthorizedException
 from pydantic import BaseModel, Field
@@ -36,12 +38,30 @@ class Enviados(BaseModel):
     user_ids: List[str] = Field(default_factory=list, max_length=500)
 
 
+def _listar_con_reintento(admin: Any, pagina: int, intentos: int = 3) -> list:
+    """
+    `list_users`, reintentado si Supabase no contesta a tiempo.
+
+    El 25 y el 26/09, a las 13:00 UTC, `list_users` dio `ReadTimeout` y el barrido del
+    recordatorio falló entero (502). Listar es una lectura, así que reintentar no tiene
+    efectos; se espera un poco más entre intento e intento.
+    """
+    for intento in range(intentos):
+        try:
+            return admin.list_users(page=pagina, per_page=1000) or []
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if intento == intentos - 1:
+                raise
+            time.sleep(2 * (intento + 1))
+    return []
+
+
 def _usuarios_completos() -> List[Dict[str, Any]]:
     admin = SupabaseManager.get_service_client().auth.admin
     salida: List[Dict[str, Any]] = []
     pagina = 1
     while True:
-        lote = admin.list_users(page=pagina, per_page=1000) or []
+        lote = _listar_con_reintento(admin, pagina)
         for u in lote:
             salida.append({
                 "id": str(u.id),
@@ -69,10 +89,18 @@ class OnboardingController(Controller):
             raise NotAuthorizedException("Invalid secret token.")
 
     @get("/recordatorios")
-    async def recordatorios(self, request: Request, dia: Optional[date] = None) -> List[Dict[str, Any]]:
-        """Quiénes se registraron `dia` (por defecto, ayer en Argentina) y no cargaron vuelos."""
+    async def recordatorios(
+        self, request: Request, dia: Optional[date] = None, ventana: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Quiénes se registraron en los `ventana` días hasta `dia` inclusive (por defecto,
+        de hace tres días a ayer, en Argentina) y no cargaron vuelos. La ventana cubre las
+        corridas que fallan: el marcado evita que a alguien le llegue dos veces.
+        """
         self._verify_secret(request)
-        objetivo = dia or (datetime.now(ARGENTINA).date() - timedelta(days=1))
+        hoy = datetime.now(ARGENTINA).date()
+        objetivo = dia or (hoy - timedelta(days=1))
+        ventana = min(max(ventana, 1), 14)
         usuarios, perfiles, vuelos, aviones = await asyncio.gather(
             asyncio.to_thread(_usuarios_completos),
             asyncio.to_thread(lambda: _todas("profiles", "id,first_name,whatsapp_phone")),
@@ -86,6 +114,8 @@ class OnboardingController(Controller):
             con_vuelos={str(v["user_id"]) for v in vuelos},
             con_avion={str(a["user_id"]) for a in aviones if not a.get("is_simulator")},
             dia=objetivo,
+            ventana=ventana,
+            hoy=hoy,
         )
 
     @post("/recordatorios/enviados", status_code=200)
