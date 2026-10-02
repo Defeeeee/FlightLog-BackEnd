@@ -95,6 +95,8 @@ LECTURAS: Dict[str, Callable[[], Any]] = {
     "programados": lambda: _todas("planned_flights", "user_id"),
     "metricas": lambda: _todas("custom_stats", "user_id"),
     "auditoria": lambda: _todas("audit_findings", "user_id"),
+    "mail_envios": lambda: _todas("mail_envios", "id,user_id,tipo,clave,enviado_at"),
+    "mail_eventos": lambda: _todas("mail_eventos", "envio_id,tipo,destino,creado_at"),
     "reportes": lambda: _cuantas("reportes"),
     "chats_whatsapp": lambda: _cuantas("whatsapp_chats"),
 }

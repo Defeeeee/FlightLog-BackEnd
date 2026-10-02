@@ -59,6 +59,11 @@ jobs:
       - name: Resumen mensual
         run: python test_resumen_mensual.py
 
+      # Offline. A quién le toca el mail de novedades, y las métricas de aperturas y
+      # clics del panel: por envío, sin contar al administrador y sin dividir por cero.
+      - name: Seguimiento de mails
+        run: python test_mails.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.

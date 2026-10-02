@@ -55,6 +55,8 @@ class Crudos:
     programados: List[dict] = field(default_factory=list)  # user_id
     metricas: List[dict] = field(default_factory=list)  # user_id
     auditoria: List[dict] = field(default_factory=list)  # user_id
+    mail_envios: List[dict] = field(default_factory=list)  # id, user_id, tipo, clave, enviado_at
+    mail_eventos: List[dict] = field(default_factory=list)  # envio_id, tipo, destino, creado_at
     reportes: int = 0
     chats_whatsapp: int = 0
     #: Las tablas que no se pudieron leer. "No sé" no es "no hay": el panel las nombra.
@@ -301,4 +303,12 @@ def armar(c: Crudos, ahora: datetime, excluir: Optional[Set[str]] = None, dias: 
         "top_aeronaves": [{"tipo": k, "vuelos": v} for k, v in tipos.most_common(6)],
         "cohortes": cohortes,
         "ultimas_altas": ultimas_altas,
+        # Import adentro: `services/mails.py` usa los ayudantes de este módulo.
+        "mails": _mails(c, ids, arroba_de, ahora),
     }
+
+
+def _mails(c: Crudos, ids: Set[str], arroba_de: Dict[str, Any], ahora: datetime) -> Dict[str, Any]:
+    from src.services.mails import mails_del_panel
+
+    return mails_del_panel(c.mail_envios, c.mail_eventos, ids, arroba_de, ahora)

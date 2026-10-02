@@ -32,6 +32,7 @@ from src.controllers.cuidado import PushController, ReportesController
 from src.controllers.admin import AdminController
 from src.controllers.onboarding import OnboardingController, OnboardingEstadoController
 from src.controllers.resumen_mensual import ResumenMensualController
+from src.controllers.mails import MailsController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -116,6 +117,7 @@ api_router = Router(
         # El estado del alta del piloto que pregunta: con sesión.
         OnboardingEstadoController,
         ResumenMensualController,
+        MailsController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

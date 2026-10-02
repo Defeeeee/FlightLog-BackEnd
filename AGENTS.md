@@ -1365,3 +1365,29 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado. Las cuatro altas perdidas tienen entre 5 y 6 días; mandarles el mail ahora es decisión de Federico.
 
 **Verificación:** `test_recordatorios.py` 15/15, `test_resumen_mensual.py` 13/13, `ruff --select=E9,F` y `import src.app`. **No probado** contra un timeout real.
+
+### 2026-10-02 20:36 UTC — Claude (Opus 5.5, vía Claude Code) — Seguimiento propio de los mails y el mail de novedades: `/mails`
+
+**Qué cambié:**
+- `migrations/023_mails_seguimiento.sql` (aplicada en producción): `mail_envios` (un renglón por mail) y `mail_eventos` (aperturas y clics). RLS prendido y sin políticas, y los permisos por defecto de `anon` y `authenticated` revocados.
+- `src/services/mails.py`: `pendientes_de_novedades` y `mails_del_panel` (las métricas). Puro.
+- `src/controllers/mails.py`: `POST /mails/envios`, `POST /mails/eventos`, `GET /mails/novedades/pendientes` y `POST /mails/baja`, con el secreto de los barridos.
+- `src/controllers/admin.py`, `src/services/estadisticas.py`: `/admin/estadisticas` suma la clave `mails`.
+- `test_mails.py` (23 checks) y su paso en `ci.yml`. `src/app.py` registra `MailsController`.
+
+**Por qué:**
+- Federico pidió mandar un mail de novedades a todas las cuentas y medirlo "directamente nosotros", con las métricas en el panel. Resend sólo dice "entregado", y eso no alcanzaba para saber si los pilotos que no volvieron habían visto el mail.
+- **Dos tablas y no las marcas del `app_metadata`**: un evento por apertura o clic no entra en una marca, y el panel necesita agregarlos. De paso, el "ya se lo mandé" de novedades sale de `mail_envios` (tipo + clave) y no de otra marca.
+- **Todo se cuenta por envío, no por evento.** Abrir un mail cinco veces es un mail abierto. Gmail cachea la imagen y Apple Mail la baja solo, así que contar eventos no significa nada; contar mails con al menos uno sirve para comparar.
+- **`POST /mails/eventos` no falla si el envío no existe:** contesta `registrado: false`. Del otro lado hay un piloto esperando una imagen o una redirección.
+- **La baja es por tipo de mail** (`resumen_mensual_baja`, `novedades_baja`): darse de baja de las novedades no saca del resumen. `POST /resumen-mensual/baja` sigue andando, pero el frontend ya usa `/mails/baja`.
+- En empate de clics, los destinos se ordenan por nombre. Con `Counter.most_common` el orden dependía del hash de las cadenas, y el test fallaba una de cada tantas corridas.
+- El panel no muestra mails ni ids: cada envío sale con el @ de la cuenta, como el resto.
+
+**Estado:** terminado. El frontend que manda con seguimiento va en su repo.
+
+**Verificación:**
+- `test_mails.py` 23/23, corrido con seis `PYTHONHASHSEED` distintos; `test_estadisticas.py` 28/28.
+- `import src.app` y `ruff --select=E9,F`.
+- En la base: `mail_envios` y `mail_eventos` con RLS prendido, cero políticas y permisos sólo para `postgres` y `service_role` (consultado en `pg_class`).
+- **Sin probar todavía** contra producción con un mail real: se prueba al desplegar el frontend.
