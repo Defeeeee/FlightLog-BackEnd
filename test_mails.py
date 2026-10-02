@@ -7,7 +7,7 @@ Offline, con diccionarios. `python test_mails.py`; sale con código 1 si algo fa
 import sys
 from datetime import datetime, timezone
 
-from src.services.mails import BAJA_NOVEDADES, SEGUNDOS_AUTOMATICO, mails_del_panel, pendientes_de_novedades
+from src.services.mails import BAJA_NOVEDADES, SEGUNDOS_AL_INSTANTE, mails_del_panel, pendientes_de_novedades
 
 resultados = []
 
@@ -75,7 +75,7 @@ pv = next(c for c in m["campanas"] if c["tipo"] == "primer-vuelo")
 check("un mail sin abrir no inventa demora", pv["abiertos"] == 0 and pv["minutos_hasta_abrir"] is None)
 
 p = m["pilotos"]
-check("pilotos: con mails, abrieron, clic y nunca abrieron", p == {"con_mails": 3, "abrieron_alguno": 2, "hicieron_clic": 1, "nunca_abrieron": 1})
+check("pilotos: con mails, abrieron, clic, al instante y sin señales", p == {"con_mails": 3, "abrieron_alguno": 2, "hicieron_clic": 1, "solo_al_instante": 0, "nunca_abrieron": 1})
 
 dia2 = next(d for d in m["por_dia"] if d["dia"] == "2026-10-02")
 dia3 = next(d for d in m["por_dia"] if d["dia"] == "2026-10-03")
@@ -89,30 +89,37 @@ check("los últimos envíos, sin mails ni ids, con el @", u[0]["tipo"] == "noved
 e1 = next(x for x in u if x["arroba"] == "ana" and x["tipo"] == "novedades")
 check("cada envío dice cuándo se abrió y qué links se tocaron", e1["aperturas"] == 2 and e1["clics"] == 3 and e1["destinos"] == ["/dashboard", "/dashboard/log-flight"])
 
-# --- lo que pasa en el primer minuto no es una persona ---
-# Como en la tanda del 2026-10-02: el correo baja las imágenes al recibir el mail.
+# --- lo que pasa en el primer minuto es dudoso: un tercer estado ---
+# Como en la tanda del 2026-10-02: 6 de 15 pidieron la imagen entre 7 y 44 segundos, y
+# Federico, que abrió su mail, quedó con una sola apertura a los 12.
 auto_envios = [
     {"id": "x1", "user_id": "a", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
     {"id": "x2", "user_id": "d", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
     {"id": "x3", "user_id": "e", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
+    {"id": "x4", "user_id": "f", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
 ]
 auto_eventos = [
-    # x1: sólo la máquina, a los 7 segundos (apertura y un clic del antispam).
+    # x1: sólo en el primer minuto (apertura a los 7 s y un clic a los 9).
     {"envio_id": "x1", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:46:07Z"},
     {"envio_id": "x1", "tipo": "clic", "destino": "/dashboard", "creado_at": "2026-10-02T20:46:09Z"},
-    # x2: la máquina a los 20 segundos, y la persona dos horas después.
+    # x2: a los 20 segundos, y otra vez dos horas después: abierto, sin dudas.
     {"envio_id": "x2", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:46:20Z"},
     {"envio_id": "x2", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T22:46:00Z"},
-    # x3: justo en el límite ya cuenta como persona.
+    # x3: justo en el límite ya no es "al instante".
     {"envio_id": "x3", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:47:00Z"},
+    # x4: nada.
 ]
-a = mails_del_panel(auto_envios, auto_eventos, ids={"a", "d", "e"}, arroba_de={}, ahora=AHORA)["totales"]
-check("el umbral de lo automático es un minuto", SEGUNDOS_AUTOMATICO == 60)
-check("una apertura a los 7 segundos no es un mail abierto", a["abiertos"] == 2)
-check("un clic a los 9 segundos no es un clic", a["con_clic"] == 0)
-check("cuenta aparte los mails que tocó una máquina", a["automaticos"] == 2)
-check("si después lo abre la persona, cuenta, y la demora es la de la persona", a["minutos_hasta_abrir"] == round((120 + 1) / 2))
-check("sin eventos automáticos, da cero", t["automaticos"] == 0)
+panel = mails_del_panel(auto_envios, auto_eventos, ids={"a", "d", "e", "f"}, arroba_de={"a": "ana"}, ahora=AHORA)
+a = panel["totales"]
+check("el primer minuto es el umbral", SEGUNDOS_AL_INSTANTE == 60)
+check("una apertura a los 7 segundos no se cuenta como abierto", a["abiertos"] == 2)
+check("un clic a los 9 segundos no se cuenta como clic", a["con_clic"] == 0)
+check("pero tampoco como 'no abierto': es un tercer estado", a["al_instante"] == 1 and a["sin_senales"] == 1)
+check("los tres estados suman los enviados", a["abiertos"] + a["al_instante"] + a["sin_senales"] == a["enviados"])
+check("si después hay otra apertura, es abierto y no 'al instante'", a["minutos_hasta_abrir"] == round((120 + 1) / 2))
+check("cada envío dice si quedó en 'al instante'", next(x for x in panel["ultimos"] if x["arroba"] == "ana")["al_instante"] is True)
+check("pilotos: uno sólo con señal al instante, otro sin ninguna", panel["pilotos"]["solo_al_instante"] == 1 and panel["pilotos"]["nunca_abrieron"] == 1)
+check("sin eventos tempranos, da cero", t["al_instante"] == 0 and t["sin_senales"] == 2)
 
 vacio = mails_del_panel([], [], ids=set(), arroba_de={}, ahora=AHORA)
 check("sin envíos no divide por cero", vacio["totales"]["tasa_apertura"] == 0.0 and vacio["campanas"] == [])

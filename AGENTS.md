@@ -1408,3 +1408,23 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado.
 
 **Verificación:** `test_mails.py` 29/29 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`.
+
+### 2026-10-02 20:55 UTC — Claude (Opus 5.5, vía Claude Code) — Mails: "al instante" es un tercer estado, no "automático"
+
+**Qué cambié:**
+- `src/services/mails.py`: `SEGUNDOS_AL_INSTANTE` reemplaza a `SEGUNDOS_AUTOMATICO`. Cada grupo trae `al_instante` (mails cuya única señal fue en el primer minuto) y `sin_senales`; sale `automaticos`. Cada envío de `ultimos` trae `al_instante`, y `pilotos` suma `solo_al_instante`.
+- `test_mails.py`: 32 checks. Los tres estados suman los enviados.
+
+**Por qué (corrige la entrada anterior):**
+- La entrada anterior decía que lo del primer minuto "no es una persona". **Era demasiado fuerte.** Federico abrió su mail de la tanda y el panel lo mostró como no abierto: su único evento es una apertura a los 12 segundos.
+- Lo que se ve en `mail_eventos` de la tanda: 6 de 15 con una apertura entre 7 y 44 segundos y ninguna después; los otros 9, sin nada. Entre los Gmail, 5 de 13.
+- Dos lecturas, y no se pueden separar con lo que se guarda:
+  - el correo bajó la imagen al recibir el mail, y cuando Federico lo abrió Gmail la sirvió de su cache;
+  - o Federico lo abrió a los 12 segundos.
+- Por eso no va ni a "abierto" ni a "no abierto". Es un estado aparte, y el panel lo explica.
+- **No se probó** si Gmail vuelve a pedir la imagen en una segunda apertura. Se sirve con `no-store`, pero el mail de Federico tiene un solo evento.
+- El clic no tiene este problema: pasa siempre por la redirección. Sí se siguen dejando fuera de `con_clic` los del primer minuto, por los filtros que abren links.
+
+**Estado:** terminado.
+
+**Verificación:** `test_mails.py` 32/32 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`.

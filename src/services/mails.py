@@ -14,12 +14,17 @@ y cada clic, un evento. Acá está lo que se calcula con eso, **puro**: el contr
   una persona.
 - Por eso todo se cuenta **por envío** (¿este mail tuvo al menos una apertura?) y no por
   evento: abrir el mismo mail cinco veces es un mail abierto.
-- **Lo que pasa en el primer minuto no es una persona** (`SEGUNDOS_AUTOMATICO`). En la
-  primera tanda de novedades (2026-10-02), 5 de 15 mails "se abrieron" entre 6 y 21
-  segundos después de salir: es el correo, o su antispam, bajando las imágenes al
-  recibirlo. Esos eventos se cuentan aparte, como automáticos, y no como aperturas ni
-  clics. Se pierde al que de verdad abre en menos de un minuto; se prefiere eso a un
-  33 % de apertura que no existió.
+- **Lo que pasa en el primer minuto es dudoso, y va aparte** (`SEGUNDOS_AL_INSTANTE`). En
+  la primera tanda de novedades (2026-10-02), 6 de 15 mails pidieron la imagen entre 7 y
+  44 segundos después de salir, y ninguno volvió a pedirla.
+  - Puede ser el correo, o su antispam, bajando las imágenes al recibir el mail.
+  - Puede ser alguien que lo abrió al toque.
+  - Y en Gmail, si fue lo primero, **la apertura de verdad de más tarde no se ve**: Google
+    guarda la imagen en su servidor y no la vuelve a pedir. Le pasó a Federico: abrió su
+    mail y sólo quedó anotada una apertura a los 12 segundos.
+  Contarlos como abiertos infla el número; contarlos como no abiertos lo desinfla. Por eso
+  son un tercer estado, "al instante", y el panel dice qué significa. **Un clic sí es
+  confiable** más allá del primer minuto: pasa siempre por la redirección.
 """
 
 from __future__ import annotations
@@ -78,8 +83,8 @@ def _tramo(minutos: float) -> str:
 
 TRAMOS = ("menos de 1 h", "1 a 6 h", "6 a 24 h", "más de 1 día")
 
-#: Antes de esto, una apertura o un clic se toma por automático (ver el encabezado).
-SEGUNDOS_AUTOMATICO = 60
+#: Antes de esto, una apertura o un clic es "al instante": dudoso (ver el encabezado).
+SEGUNDOS_AL_INSTANTE = 60
 
 
 def mails_del_panel(
@@ -100,21 +105,25 @@ def mails_del_panel(
     propios = {str(e["id"]): e for e in envios if e.get("id") and str(e.get("user_id")) in ids}
     aperturas: Dict[str, List[datetime]] = defaultdict(list)
     clics: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    #: Los envíos con algún evento en el primer minuto: los tocó una máquina.
-    automaticos: Set[str] = set()
+    #: Los envíos con algún evento en el primer minuto: el correo, o alguien muy rápido.
+    instantaneos: Set[str] = set()
     for ev in eventos:
         eid = str(ev.get("envio_id"))
         cuando = _momento(ev.get("creado_at"))
         if eid not in propios or not cuando:
             continue
         enviado = _momento(propios[eid].get("enviado_at"))
-        if enviado and (cuando - enviado).total_seconds() < SEGUNDOS_AUTOMATICO:
-            automaticos.add(eid)
+        if enviado and (cuando - enviado).total_seconds() < SEGUNDOS_AL_INSTANTE:
+            instantaneos.add(eid)
             continue
         if ev.get("tipo") == "apertura":
             aperturas[eid].append(cuando)
         elif ev.get("tipo") == "clic":
             clics[eid].append({"cuando": cuando, "destino": ev.get("destino") or "(sin destino)"})
+
+    def solo_al_instante(eid: str) -> bool:
+        """Tuvo una señal en el primer minuto y ninguna después."""
+        return eid in instantaneos and not aperturas[eid] and not clics[eid]
 
     def resumen(grupo: List[str]) -> Dict[str, Any]:
         abiertos = [e for e in grupo if aperturas[e]]
@@ -133,8 +142,9 @@ def mails_del_panel(
             # Sobre los que lo abrieron: ¿el mail convence a quien lo ve?
             "clic_sobre_abiertos": _pct(len(con_clic), len(abiertos)),
             "minutos_hasta_abrir": round(median(demoras)) if demoras else None,
-            # Mails que una máquina tocó en el primer minuto. No dice nada del piloto.
-            "automaticos": sum(1 for e in grupo if e in automaticos),
+            # Sólo tuvieron una señal en el primer minuto: no se sabe si lo abrió alguien.
+            "al_instante": sum(1 for e in grupo if solo_al_instante(e)),
+            "sin_senales": sum(1 for e in grupo if not aperturas[e] and not clics[e] and e not in instantaneos),
         }
 
     por_campana: Dict[tuple, List[str]] = defaultdict(list)
@@ -193,6 +203,7 @@ def mails_del_panel(
         "clave": propios[e].get("clave"),
         "arroba": arroba_de.get(str(propios[e].get("user_id"))),
         "abierto": _iso(min(aperturas[e])) if aperturas[e] else None,
+        "al_instante": solo_al_instante(e),
         "aperturas": len(aperturas[e]),
         "clics": len(clics[e]),
         "destinos": sorted({c["destino"] for c in clics[e]}),
@@ -206,7 +217,16 @@ def mails_del_panel(
         "con_mails": len(por_piloto),
         "abrieron_alguno": sum(1 for g in por_piloto.values() if any(aperturas[e] for e in g)),
         "hicieron_clic": sum(1 for g in por_piloto.values() if any(clics[e] for e in g)),
-        "nunca_abrieron": sum(1 for g in por_piloto.values() if not any(aperturas[e] for e in g)),
+        # Ningún mail abierto con certeza, pero alguno con una señal al instante.
+        "solo_al_instante": sum(
+            1 for g in por_piloto.values()
+            if not any(aperturas[e] or clics[e] for e in g) and any(e in instantaneos for e in g)
+        ),
+        # Ninguna señal en ningún mail: ni siquiera el correo bajó la imagen.
+        "nunca_abrieron": sum(
+            1 for g in por_piloto.values()
+            if not any(aperturas[e] or clics[e] or e in instantaneos for e in g)
+        ),
     }
 
     return {
