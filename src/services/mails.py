@@ -14,6 +14,12 @@ y cada clic, un evento. Acá está lo que se calcula con eso, **puro**: el contr
   una persona.
 - Por eso todo se cuenta **por envío** (¿este mail tuvo al menos una apertura?) y no por
   evento: abrir el mismo mail cinco veces es un mail abierto.
+- **Lo que pasa en el primer minuto no es una persona** (`SEGUNDOS_AUTOMATICO`). En la
+  primera tanda de novedades (2026-10-02), 5 de 15 mails "se abrieron" entre 6 y 21
+  segundos después de salir: es el correo, o su antispam, bajando las imágenes al
+  recibirlo. Esos eventos se cuentan aparte, como automáticos, y no como aperturas ni
+  clics. Se pierde al que de verdad abre en menos de un minuto; se prefiere eso a un
+  33 % de apertura que no existió.
 """
 
 from __future__ import annotations
@@ -72,6 +78,9 @@ def _tramo(minutos: float) -> str:
 
 TRAMOS = ("menos de 1 h", "1 a 6 h", "6 a 24 h", "más de 1 día")
 
+#: Antes de esto, una apertura o un clic se toma por automático (ver el encabezado).
+SEGUNDOS_AUTOMATICO = 60
+
 
 def mails_del_panel(
     envios: Iterable[Dict[str, Any]],
@@ -91,10 +100,16 @@ def mails_del_panel(
     propios = {str(e["id"]): e for e in envios if e.get("id") and str(e.get("user_id")) in ids}
     aperturas: Dict[str, List[datetime]] = defaultdict(list)
     clics: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    #: Los envíos con algún evento en el primer minuto: los tocó una máquina.
+    automaticos: Set[str] = set()
     for ev in eventos:
         eid = str(ev.get("envio_id"))
         cuando = _momento(ev.get("creado_at"))
         if eid not in propios or not cuando:
+            continue
+        enviado = _momento(propios[eid].get("enviado_at"))
+        if enviado and (cuando - enviado).total_seconds() < SEGUNDOS_AUTOMATICO:
+            automaticos.add(eid)
             continue
         if ev.get("tipo") == "apertura":
             aperturas[eid].append(cuando)
@@ -118,6 +133,8 @@ def mails_del_panel(
             # Sobre los que lo abrieron: ¿el mail convence a quien lo ve?
             "clic_sobre_abiertos": _pct(len(con_clic), len(abiertos)),
             "minutos_hasta_abrir": round(median(demoras)) if demoras else None,
+            # Mails que una máquina tocó en el primer minuto. No dice nada del piloto.
+            "automaticos": sum(1 for e in grupo if e in automaticos),
         }
 
     por_campana: Dict[tuple, List[str]] = defaultdict(list)

@@ -7,7 +7,7 @@ Offline, con diccionarios. `python test_mails.py`; sale con código 1 si algo fa
 import sys
 from datetime import datetime, timezone
 
-from src.services.mails import BAJA_NOVEDADES, mails_del_panel, pendientes_de_novedades
+from src.services.mails import BAJA_NOVEDADES, SEGUNDOS_AUTOMATICO, mails_del_panel, pendientes_de_novedades
 
 resultados = []
 
@@ -88,6 +88,31 @@ u = m["ultimos"]
 check("los últimos envíos, sin mails ni ids, con el @", u[0]["tipo"] == "novedades" and "user_id" not in u[0] and any(x["arroba"] == "ana" for x in u))
 e1 = next(x for x in u if x["arroba"] == "ana" and x["tipo"] == "novedades")
 check("cada envío dice cuándo se abrió y qué links se tocaron", e1["aperturas"] == 2 and e1["clics"] == 3 and e1["destinos"] == ["/dashboard", "/dashboard/log-flight"])
+
+# --- lo que pasa en el primer minuto no es una persona ---
+# Como en la tanda del 2026-10-02: el correo baja las imágenes al recibir el mail.
+auto_envios = [
+    {"id": "x1", "user_id": "a", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
+    {"id": "x2", "user_id": "d", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
+    {"id": "x3", "user_id": "e", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:46:00Z"},
+]
+auto_eventos = [
+    # x1: sólo la máquina, a los 7 segundos (apertura y un clic del antispam).
+    {"envio_id": "x1", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:46:07Z"},
+    {"envio_id": "x1", "tipo": "clic", "destino": "/dashboard", "creado_at": "2026-10-02T20:46:09Z"},
+    # x2: la máquina a los 20 segundos, y la persona dos horas después.
+    {"envio_id": "x2", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:46:20Z"},
+    {"envio_id": "x2", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T22:46:00Z"},
+    # x3: justo en el límite ya cuenta como persona.
+    {"envio_id": "x3", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:47:00Z"},
+]
+a = mails_del_panel(auto_envios, auto_eventos, ids={"a", "d", "e"}, arroba_de={}, ahora=AHORA)["totales"]
+check("el umbral de lo automático es un minuto", SEGUNDOS_AUTOMATICO == 60)
+check("una apertura a los 7 segundos no es un mail abierto", a["abiertos"] == 2)
+check("un clic a los 9 segundos no es un clic", a["con_clic"] == 0)
+check("cuenta aparte los mails que tocó una máquina", a["automaticos"] == 2)
+check("si después lo abre la persona, cuenta, y la demora es la de la persona", a["minutos_hasta_abrir"] == round((120 + 1) / 2))
+check("sin eventos automáticos, da cero", t["automaticos"] == 0)
 
 vacio = mails_del_panel([], [], ids=set(), arroba_de={}, ahora=AHORA)
 check("sin envíos no divide por cero", vacio["totales"]["tasa_apertura"] == 0.0 and vacio["campanas"] == [])

@@ -1391,3 +1391,20 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - `import src.app` y `ruff --select=E9,F`.
 - En la base: `mail_envios` y `mail_eventos` con RLS prendido, cero políticas y permisos sólo para `postgres` y `service_role` (consultado en `pg_class`).
 - **Sin probar todavía** contra producción con un mail real: se prueba al desplegar el frontend.
+
+### 2026-10-02 20:51 UTC — Claude (Opus 5.5, vía Claude Code) — Mails: lo que pasa en el primer minuto es automático
+
+**Qué cambié:**
+- `src/services/mails.py`: `SEGUNDOS_AUTOMATICO = 60`. Un evento a menos de un minuto del envío no cuenta como apertura ni como clic; el envío se cuenta en `automaticos`.
+- `test_mails.py`: seis checks más (29 en total), con el caso de la tanda real.
+
+**Por qué:**
+- La primera tanda de novedades salió a 15 cuentas a las 20:46 UTC. Según `mail_eventos`, **cinco mails pidieron la imagen entre 6,6 y 21,1 segundos después**. Nadie abre un mail a los siete segundos de recibirlo: es el correo, o su antispam, bajando las imágenes.
+- Sin el corte, el panel habría mostrado un 33 % de apertura que no existió, y la decisión de qué mail sirve se tomaría sobre eso.
+- **El corte es al contar, no al anotar:** `mail_eventos` guarda todo. Si el umbral resulta corto o largo, se cambia sin perder datos.
+- **Se descartó clasificar por `User-Agent`:** exigía otra columna, y el que más confunde (Apple Mail) no se identifica. El tiempo separa los dos casos sin guardar nada más del piloto.
+- **Lo que se pierde:** quien abre de verdad en menos de un minuto no cuenta, salvo que vuelva a abrirlo. La imagen se sirve con `no-store`, así que una segunda apertura la vuelve a pedir.
+
+**Estado:** terminado.
+
+**Verificación:** `test_mails.py` 29/29 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`.
