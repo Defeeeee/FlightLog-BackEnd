@@ -121,6 +121,24 @@ check("cada envío dice si quedó en 'al instante'", next(x for x in panel["ulti
 check("pilotos: uno sólo con señal al instante, otro sin ninguna", panel["pilotos"]["solo_al_instante"] == 1 and panel["pilotos"]["nunca_abrieron"] == 1)
 check("sin eventos tempranos, da cero", t["al_instante"] == 0 and t["sin_senales"] == 2)
 
+# --- un clic también es una apertura ---
+# El mail de Federico de la tanda: la imagen a los 12 segundos, y dos clics a los 4 minutos.
+fede_envios = [{"id": "f1", "user_id": "a", "tipo": "novedades", "clave": "z", "enviado_at": "2026-10-02T20:49:34Z"}]
+fede_eventos = [
+    {"envio_id": "f1", "tipo": "apertura", "destino": None, "creado_at": "2026-10-02T20:49:47Z"},
+    {"envio_id": "f1", "tipo": "clic", "destino": "/dashboard", "creado_at": "2026-10-02T20:54:02Z"},
+    {"envio_id": "f1", "tipo": "clic", "destino": "/dashboard", "creado_at": "2026-10-02T20:54:18Z"},
+]
+fede = mails_del_panel(fede_envios, fede_eventos, ids={"a"}, arroba_de={"a": "defee"}, ahora=AHORA)
+ft = fede["totales"]
+check("un mail con clic es un mail abierto, aunque la imagen sólo se haya pedido al instante", ft["abiertos"] == 1 and ft["con_clic"] == 1)
+check("y no queda como 'al instante' ni 'sin señales'", ft["al_instante"] == 0 and ft["sin_senales"] == 0)
+check("la demora hasta abrirlo es hasta el primer clic", ft["minutos_hasta_abrir"] == round((4 * 60 + 28) / 60))
+check("el envío dice cuándo se abrió", fede["ultimos"][0]["abierto"] is not None and fede["ultimos"][0]["al_instante"] is False)
+check("el piloto cuenta como que abrió alguno", fede["pilotos"]["abrieron_alguno"] == 1 and fede["pilotos"]["solo_al_instante"] == 0)
+for nombre, grupo in (("la tanda de prueba", a), ("el mail de Federico", ft), ("los de más arriba", t)):
+    check(f"los tres estados suman los enviados: {nombre}", grupo["abiertos"] + grupo["al_instante"] + grupo["sin_senales"] == grupo["enviados"])
+
 vacio = mails_del_panel([], [], ids=set(), arroba_de={}, ahora=AHORA)
 check("sin envíos no divide por cero", vacio["totales"]["tasa_apertura"] == 0.0 and vacio["campanas"] == [])
 

@@ -1428,3 +1428,18 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado.
 
 **Verificación:** `test_mails.py` 32/32 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`.
+
+### 2026-10-02 20:59 UTC — Claude (Opus 5.5, vía Claude Code) — Mails: un clic también es una apertura
+
+**Qué cambié:**
+- `src/services/mails.py`: `abierto_en` toma la primera apertura **o el primer clic** pasado el primer minuto. Lo usan los totales, la serie por día, la hora, los tramos, `ultimos` y `pilotos`.
+- `test_mails.py`: 40 checks. El caso del mail de Federico, y que los tres estados sumen los enviados en cada grupo.
+
+**Por qué:**
+- Con los datos reales de la tanda, el mail de Federico quedó con dos clics y cero aperturas: su única apertura fue a los 12 segundos (al instante) y los clics, a los 4 minutos. Un mail en el que alguien tocó un link se abrió.
+- Además rompía la cuenta: 0 abiertos + 5 al instante + 9 sin señales = 14 de 15 enviados. El mail con clic no estaba en ninguno de los tres estados.
+- Se vio corriendo `armar()` en el VPS sobre los datos de producción, no en los tests: los tests no tenían un mail con clic y sin apertura tardía.
+
+**Estado:** terminado.
+
+**Verificación:** `test_mails.py` 40/40 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`. Después del deploy se vuelve a correr `armar()` sobre producción.

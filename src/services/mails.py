@@ -125,14 +125,24 @@ def mails_del_panel(
         """Tuvo una señal en el primer minuto y ninguna después."""
         return eid in instantaneos and not aperturas[eid] and not clics[eid]
 
+    def abierto_en(eid: str) -> Optional[datetime]:
+        """
+        Cuándo se abrió, con certeza: la primera apertura o el primer clic pasado el primer
+        minuto. **Un clic también es una apertura**: nadie toca un link de un mail sin
+        abrirlo. Importa en Gmail, donde la imagen pudo bajarse al instante y la apertura
+        de verdad no verse (le pasó a Federico: dos clics y ninguna apertura contada).
+        """
+        momentos = aperturas[eid] + [c["cuando"] for c in clics[eid]]
+        return min(momentos) if momentos else None
+
     def resumen(grupo: List[str]) -> Dict[str, Any]:
-        abiertos = [e for e in grupo if aperturas[e]]
+        abiertos = [e for e in grupo if abierto_en(e)]
         con_clic = [e for e in grupo if clics[e]]
         demoras = []
         for e in abiertos:
             enviado = _momento(propios[e].get("enviado_at"))
             if enviado:
-                demoras.append(max(0.0, (min(aperturas[e]) - enviado).total_seconds() / 60))
+                demoras.append(max(0.0, (abierto_en(e) - enviado).total_seconds() / 60))
         return {
             "enviados": len(grupo),
             "abiertos": len(abiertos),
@@ -179,8 +189,8 @@ def mails_del_panel(
         enviado = _momento(e.get("enviado_at"))
         if enviado and enviado.astimezone(ARGENTINA).date() in serie:
             serie[enviado.astimezone(ARGENTINA).date()]["enviados"] += 1
-        if aperturas[eid]:
-            d = min(aperturas[eid]).astimezone(ARGENTINA).date()
+        if abierto_en(eid):
+            d = abierto_en(eid).astimezone(ARGENTINA).date()
             if d in serie:
                 serie[d]["abiertos"] += 1
         if clics[eid]:
@@ -189,12 +199,12 @@ def mails_del_panel(
                 serie[d]["clics"] += 1
 
     # A qué hora se abren (hora argentina de la primera apertura): cuándo conviene mandar.
-    horas = Counter(min(a).astimezone(ARGENTINA).hour for a in aperturas.values() if a)
+    horas = Counter(abierto_en(e).astimezone(ARGENTINA).hour for e in propios if abierto_en(e))
     tramos = Counter()
-    for eid, lista in aperturas.items():
+    for eid in propios:
         enviado = _momento(propios[eid].get("enviado_at"))
-        if lista and enviado:
-            tramos[_tramo(max(0.0, (min(lista) - enviado).total_seconds() / 60))] += 1
+        if abierto_en(eid) and enviado:
+            tramos[_tramo(max(0.0, (abierto_en(eid) - enviado).total_seconds() / 60))] += 1
 
     recientes = sorted(propios, key=lambda e: _momento(propios[e].get("enviado_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:25]
     ultimos = [{
@@ -202,7 +212,7 @@ def mails_del_panel(
         "tipo": propios[e].get("tipo"),
         "clave": propios[e].get("clave"),
         "arroba": arroba_de.get(str(propios[e].get("user_id"))),
-        "abierto": _iso(min(aperturas[e])) if aperturas[e] else None,
+        "abierto": _iso(abierto_en(e)),
         "al_instante": solo_al_instante(e),
         "aperturas": len(aperturas[e]),
         "clics": len(clics[e]),
@@ -215,7 +225,7 @@ def mails_del_panel(
         por_piloto[str(e.get("user_id"))].append(eid)
     pilotos = {
         "con_mails": len(por_piloto),
-        "abrieron_alguno": sum(1 for g in por_piloto.values() if any(aperturas[e] for e in g)),
+        "abrieron_alguno": sum(1 for g in por_piloto.values() if any(abierto_en(e) for e in g)),
         "hicieron_clic": sum(1 for g in por_piloto.values() if any(clics[e] for e in g)),
         # Ningún mail abierto con certeza, pero alguno con una señal al instante.
         "solo_al_instante": sum(
