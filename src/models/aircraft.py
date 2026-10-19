@@ -1,6 +1,8 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, Dict, Optional
 from uuid import UUID
+
+from src.models.plan_vuelo import validar_perfil_avion
 
 class Aircraft(BaseModel):
     id: UUID
@@ -29,6 +31,9 @@ class Aircraft(BaseModel):
     #: Va en la aeronave y no en el vuelo porque así no se puede olvidar: se carga una
     #: vez al dar de alta el equipo y cada fila que lo use queda marcada sola.
     is_simulator: bool = False
+    #: Lo fijo del avión para el plan de vuelo (migración 024): casilla 10,
+    #: NAV/PBN/PER/OPR, color, ELT, observación fija. Lo arma y lo lee el frontend.
+    plan_vuelo: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,6 +62,14 @@ class AircraftCreate(BaseModel):
     #: Va en la aeronave y no en el vuelo porque así no se puede olvidar: se carga una
     #: vez al dar de alta el equipo y cada fila que lo use queda marcada sola.
     is_simulator: bool = False
+    #: Lo fijo del avión para el plan de vuelo (migración 024): casilla 10,
+    #: NAV/PBN/PER/OPR, color, ELT, observación fija. Lo arma y lo lee el frontend.
+    plan_vuelo: Optional[Dict[str, Any]] = None
+
+    @field_validator("plan_vuelo")
+    @classmethod
+    def _plan_vuelo(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return validar_perfil_avion(v)
 
 class AircraftUpdate(BaseModel):
     registration: Optional[str] = None
@@ -74,3 +87,12 @@ class AircraftUpdate(BaseModel):
     #: vuelo de ANAC (Res. 147/2013). Opcional: en blanco, se completa a mano.
     potencia_hp: Optional[int] = Field(default=None, gt=0, le=100000)
     is_simulator: Optional[bool] = None
+    #: Lo fijo del avión para el plan de vuelo (migración 024): casilla 10,
+    #: NAV/PBN/PER/OPR, color, ELT, observación fija. Lo arma y lo lee el frontend.
+    plan_vuelo: Optional[Dict[str, Any]] = None
+
+    @field_validator("plan_vuelo")
+    @classmethod
+    def _plan_vuelo(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return validar_perfil_avion(v)
+

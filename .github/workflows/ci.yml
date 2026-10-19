@@ -64,6 +64,9 @@ jobs:
       - name: Seguimiento de mails
         run: python test_mails.py
 
+      - name: Planes de vuelo guardados
+        run: python test_planes_de_vuelo.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.

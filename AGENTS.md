@@ -1443,3 +1443,30 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado.
 
 **Verificación:** `test_mails.py` 40/40 con tres `PYTHONHASHSEED`, `test_estadisticas.py` 28/28, `ruff --select=E9,F`. Después del deploy se vuelve a correr `armar()` sobre producción.
+
+### 2026-10-19 21:47 UTC — Claude (Opus 5.5, vía Claude Code) — Planes de vuelo guardados, perfil del avión para el plan y firma
+
+**Qué cambié:**
+- `migrations/024_planes_de_vuelo.sql` (**aplicada en producción**, `apply_migration`):
+  - `planes_de_vuelo`: el formulario entero en `formulario` jsonb (tope 64 KB), más una copia para la lista (`salida`, `destino`, `matricula`, `dof`, `eobt`), `completo`, `descargado_at` y `demoras`;
+  - `aircraft.plan_vuelo` jsonb;
+  - `firmas_plan_vuelo` (un PNG por piloto);
+  - RLS con las cuatro políticas en las dos tablas nuevas, y sin nada para `anon`.
+- `src/models/plan_vuelo.py`: los modelos, los topes de tamaño (formulario 32 KB, firma 250 KB, perfil del avión 8 KB) y `resumen_para_lista`. Las demoras van hasta tres por vuelo (AIP ENR 1.10, 7.3).
+- `src/controllers/planes_de_vuelo.py`: `GET/POST /planes-de-vuelo`, `GET/PATCH/DELETE /planes-de-vuelo/{id}`, `GET/PUT/DELETE /planes-de-vuelo/firma`. Usa el cliente por usuario. `descargado: true` anota la hora del servidor.
+- `src/models/aircraft.py`: `plan_vuelo` en los tres modelos, con tope de tamaño.
+- `test_planes_de_vuelo.py` (15 checks) y su paso en el CI.
+
+**Por qué:**
+- Federico usa FPL.AR: 28 planes en dos meses, casi todos repetidos. Lo que le ahorra tiempo es guardar, duplicar y un perfil del avión que llena casi todo el formulario. Se pidió que Vector lo reemplace en el uso diario.
+- **El formulario es jsonb y lo valida el frontend.** Las reglas de cada casilla (AIP ENR 1.10) ya viven allá, puras y testeadas (`lib/plan-de-vuelo.ts`). Repetirlas en Python sería tener dos versiones de la misma norma.
+- **La firma va en una tabla aparte**, porque `profiles` se lee en cada pantalla y una firma son decenas de KB.
+- **Un plan de vuelo no es un vuelo**, como `planned_flights` (009): nada de esto toca `flights` ni el saldo.
+- **El envío desde Vector queda para después** (Federico, 2026-10-19).
+
+**Estado:** terminado del lado del backend. **La migración tiene que estar antes del deploy:** `AircraftCreate` ya manda `plan_vuelo`, y sin la columna fallaría dar de alta un avión.
+
+**Verificación:**
+- `test_planes_de_vuelo.py` 15/15, `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.
+- Contra la base, con un bloque `DO` que se deshace solo: el dueño ve su plan; otro piloto no lo ve, no lo borra y no puede crear uno a su nombre. `anon` no tiene SELECT en ninguna de las dos tablas.
+- Los avisos de seguridad de Supabase no suman nada nuevo.
