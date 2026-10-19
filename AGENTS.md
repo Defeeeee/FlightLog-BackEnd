@@ -1470,3 +1470,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - `test_planes_de_vuelo.py` 15/15, `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.
 - Contra la base, con un bloque `DO` que se deshace solo: el dueño ve su plan; otro piloto no lo ve, no lo borra y no puede crear uno a su nombre. `anon` no tiene SELECT en ninguna de las dos tablas.
 - Los avisos de seguridad de Supabase no suman nada nuevo.
+
+### 2026-10-19 23:52 UTC — Claude (Opus 5.5, vía Claude Code) — Los envíos del plan de vuelo por mail
+
+**Qué cambié:**
+- `migrations/025_planes_de_vuelo_envios.sql` (**aplicada en producción**): `planes_de_vuelo.envios` (jsonb) y `enviado_at`.
+- `src/models/plan_vuelo.py`: `Envio` (`prueba` | `aro`) y `envio` en el PATCH, `enviado_at` en la lista.
+- `src/controllers/planes_de_vuelo.py`: el PATCH con `envio` lo suma a la lista con la hora del servidor (tope de 20 por plan). Uno a la oficina además actualiza `enviado_at`.
+- `test_planes_de_vuelo.py`: 17 checks.
+
+**Por qué:** Federico pidió que Vector mande el plan a la oficina ARO/AIS como FPL.AR, probándolo antes con su propio mail. El mail lo arma y lo manda el frontend (Resend, con el PDF firmado); acá sólo se anota que salió.
+
+**Estado:** terminado del lado del backend. La migración va antes del deploy.
+
+**Verificación:** `test_planes_de_vuelo.py` 17/17, `import src.app`, `ruff --select=E9,F`.

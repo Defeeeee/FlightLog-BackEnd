@@ -60,6 +60,8 @@ check("hasta tres demoras por vuelo", not falla(lambda: PlanVueloUpdate(demoras=
 check("la cuarta no (AIP ENR 1.10, 7.3)", falla(lambda: PlanVueloUpdate(demoras=tres + [{"eobt": "2000", "dof": "2026-10-20"}])))
 check("una hora de demora mal escrita se rechaza", falla(lambda: PlanVueloUpdate(demoras=[{"eobt": "19:00", "dof": "2026-10-20"}])))
 
+check("un envío de prueba o a la oficina se acepta", not falla(lambda: PlanVueloUpdate(envio={"modo": "prueba", "a": "piloto@example.com"})))
+check("un envío de otro modo no", falla(lambda: PlanVueloUpdate(envio={"modo": "spam", "a": "x@example.com"})))
 check("la firma tiene que ser un PNG", falla(lambda: FirmaPlanVuelo(png="data:image/jpeg;base64,AAAA")))
 check("un PNG se acepta", not falla(lambda: FirmaPlanVuelo(png="data:image/png;base64,iVBORw0KGgo=")))
 

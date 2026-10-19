@@ -10,7 +10,7 @@ para que nadie use la tabla de depósito: el tamaño del JSON y el de la firma.
 import datetime as dt
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -88,6 +88,19 @@ class Demora(BaseModel):
     creada: Optional[dt.datetime] = None
 
 
+#: Tope de envíos por mail de un plan: es un plan, no una lista de correo.
+MAX_ENVIOS = 20
+
+
+class Envio(BaseModel):
+    """Un envío del plan por mail. `prueba` va al piloto; `aro`, a la oficina con copia al piloto."""
+
+    modo: Literal["prueba", "aro"]
+    a: str = Field(max_length=200)
+    resend_id: Optional[str] = Field(default=None, max_length=100)
+    at: Optional[dt.datetime] = None
+
+
 class PlanVueloResumen(BaseModel):
     """Lo que muestra la lista: sin el formulario."""
 
@@ -100,6 +113,7 @@ class PlanVueloResumen(BaseModel):
     dof: Optional[dt.date] = None
     eobt: Optional[str] = None
     descargado_at: Optional[dt.datetime] = None
+    enviado_at: Optional[dt.datetime] = None
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -109,6 +123,7 @@ class PlanVueloResumen(BaseModel):
 class PlanVuelo(PlanVueloResumen):
     formulario: Dict[str, Any]
     demoras: List[Demora] = []
+    envios: List[Envio] = []
 
 
 class PlanVueloCreate(BaseModel):
@@ -133,6 +148,8 @@ class PlanVueloUpdate(BaseModel):
     completo: Optional[bool] = None
     descargado: Optional[bool] = None
     demoras: Optional[List[Demora]] = Field(default=None, max_length=3)
+    #: Un envío que salió: se suma a la lista con la hora del servidor.
+    envio: Optional[Envio] = None
 
     @field_validator("formulario")
     @classmethod

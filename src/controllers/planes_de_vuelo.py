@@ -13,6 +13,7 @@ from src.models.plan_vuelo import (
     PlanVueloCreate,
     PlanVueloResumen,
     PlanVueloUpdate,
+    MAX_ENVIOS,
     resumen_para_lista,
 )
 
@@ -21,7 +22,7 @@ from src.models.plan_vuelo import (
 LIMITE_LISTA = 50
 
 COLUMNAS_LISTA = (
-    "id,aircraft_id,completo,salida,destino,matricula,dof,eobt,descargado_at,created_at,updated_at"
+    "id,aircraft_id,completo,salida,destino,matricula,dof,eobt,descargado_at,enviado_at,created_at,updated_at"
 )
 
 
@@ -99,6 +100,15 @@ class PlanesDeVueloController(Controller):
             cambios["descargado_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         if "demoras" in enviados and data.demoras is not None:
             cambios["demoras"] = enviados["demoras"]
+        if data.envio is not None:
+            actual = await self.leer(request, supabase_client, plan_id)
+            if len(actual.envios) >= MAX_ENVIOS:
+                raise ClientException(detail=f"Este plan ya se mandó {MAX_ENVIOS} veces.")
+            ahora = dt.datetime.now(dt.timezone.utc).isoformat()
+            envio = {**data.envio.model_dump(mode="json", exclude={"at"}), "at": ahora}
+            cambios["envios"] = [e.model_dump(mode="json") for e in actual.envios] + [envio]
+            if data.envio.modo == "aro":
+                cambios["enviado_at"] = ahora
         if not cambios:
             return await self.leer(request, supabase_client, plan_id)
 
