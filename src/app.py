@@ -13,7 +13,7 @@ from src.controllers.auth import AuthController
 from src.controllers.flight_helper import FlightHelperController
 from src.controllers.flight_packs import FlightPacksController
 from src.controllers.planned_flights import PlannedFlightsController
-from src.controllers.planes_de_vuelo import PlanesDeVueloController
+from src.controllers.planes_de_vuelo import PlanesDeVueloController, PlanesRecordatoriosController
 from src.controllers.logbooks import LogbooksController
 from src.controllers.custom_stats import CustomStatsController
 from src.controllers.dashboard import DashboardController
@@ -115,6 +115,7 @@ api_router = Router(
         AdminController,
         # El recordatorio del día siguiente al alta: sin sesión, con el secreto de los barridos.
         OnboardingController,
+        PlanesRecordatoriosController,
         # El estado del alta del piloto que pregunta: con sesión.
         OnboardingEstadoController,
         ResumenMensualController,

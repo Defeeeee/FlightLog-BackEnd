@@ -36,7 +36,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 from src.services.estadisticas import ARGENTINA, _iso, _momento, _pct
 
-TIPOS = ("primer-vuelo", "resumen-mensual", "briefing", "novedades")
+TIPOS = ("primer-vuelo", "resumen-mensual", "briefing", "novedades", "plan-por-registrar")
 EVENTOS = ("apertura", "clic")
 
 #: La baja de los mails de novedades, en el `app_metadata` de la cuenta. La del resumen

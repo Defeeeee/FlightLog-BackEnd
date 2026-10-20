@@ -78,6 +78,14 @@ check("el perfil del avión para el plan se acepta", not falla(lambda: AircraftU
 check("y se rechaza si es enorme", falla(lambda: AircraftUpdate(plan_vuelo={"x": "A" * 9000})))
 check("no mandarlo deja el campo como está", "plan_vuelo" not in AircraftUpdate(icao="ECHO").model_dump(exclude_unset=True))
 
+from src.services.recordatorio_plan import armar_pendientes  # noqa: E402
+
+_planes = [{"id": "p1", "user_id": "u1", "formulario": {"eet": "0045"}, "demoras": []}, {"id": "p2", "user_id": "u2", "formulario": {}}]
+_usuarios = {"u1": {"email": "a@x.com", "email_confirmed_at": "2026-10-01T00:00:00Z"}, "u2": {"email": "b@x.com", "email_confirmed_at": None}}
+_pend = armar_pendientes(_planes, _usuarios, {"u1": {"first_name": "Lucía"}}, [{"user_id": "u1", "date": "2026-10-20", "route": "SADF SADM"}, {"user_id": "u9", "date": "2026-10-20", "route": "X"}])
+check("el recordatorio no le escribe a un mail sin confirmar", [p["id"] for p in _pend] == ["p1"])
+check("el recordatorio lleva el nombre y sólo los vuelos de ese piloto", _pend[0]["first_name"] == "Lucía" and _pend[0]["vuelos"] == [{"date": "2026-10-20", "route": "SADF SADM"}])
+
 if not all(resultados):
     print(f"\n{resultados.count(False)} check(s) fallaron")
     sys.exit(1)

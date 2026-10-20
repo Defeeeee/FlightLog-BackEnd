@@ -1,12 +1,18 @@
+import asyncio
 import datetime as dt
+import hmac
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from litestar import Controller, Request, delete, get, patch, post, put
-from litestar.exceptions import ClientException, NotFoundException
+from litestar.exceptions import ClientException, NotAuthorizedException, NotFoundException
+from pydantic import BaseModel, Field
 from supabase import Client
 
 from src.auth.guards import auth_guard
+from src.config import settings
+from src.services.recordatorio_plan import armar_pendientes
+from src.supabase_client import SupabaseManager
 from src.models.plan_vuelo import (
     FirmaPlanVuelo,
     PlanVuelo,
@@ -184,3 +190,100 @@ class PlanesDeVueloController(Controller):
     async def borrar_firma(self, request: Request, supabase_client: Client) -> None:
         user_id = str(request.state.user.id)
         supabase_client.table("firmas_plan_vuelo").delete().eq("user_id", user_id).execute()
+
+
+class PlanesEnviados(BaseModel):
+    ids: List[UUID] = Field(default_factory=list, max_length=500)
+
+
+#: Hasta cuántos días atrás (por la DOF/) un plan puede necesitar el mail.
+DIAS_RECORDATORIO = 2
+
+
+class PlanesRecordatoriosController(Controller):
+    """
+    El mail "¿Cargamos tu vuelo?" de los planes presentados (`services/recordatorio_plan.py`).
+
+    Sin sesión, con el secreto de los barridos (`X-Cron-Secret`), como
+    `/onboarding/recordatorios`: un cron no tiene sesión. Usa el cliente de servicio porque
+    lee planes de todos los pilotos; por eso devuelve sólo lo que el mail necesita.
+    """
+
+    path = "/planes-de-vuelo/recordatorios"
+
+    def _verificar(self, request: Request) -> None:
+        esperado = settings.documents_alert_secret
+        recibido = request.headers.get("X-Cron-Secret") or ""
+        if not esperado:
+            raise NotAuthorizedException("El barrido no está configurado.")
+        if not recibido or not hmac.compare_digest(recibido, esperado):
+            raise NotAuthorizedException("Invalid secret token.")
+
+    @get()
+    async def pendientes(self, request: Request) -> List[Dict[str, Any]]:
+        self._verificar(request)
+        cliente = SupabaseManager.get_service_client()
+        hoy = dt.datetime.now(dt.timezone.utc).date()
+        desde = hoy - dt.timedelta(days=DIAS_RECORDATORIO)
+
+        def _planes() -> List[Dict[str, Any]]:
+            return (
+                cliente.table("planes_de_vuelo")
+                .select("id,user_id,formulario,demoras")
+                .eq("completo", True)
+                .is_("vuelo_id", "null")
+                .is_("cancelado_at", "null")
+                .is_("descartado_at", "null")
+                .is_("recordatorio_at", "null")
+                .gte("dof", desde.isoformat())
+                .lte("dof", hoy.isoformat())
+                .or_("enviado_at.not.is.null,descargado_at.not.is.null")
+                .limit(200)
+                .execute()
+                .data
+                or []
+            )
+
+        planes = await asyncio.to_thread(_planes)
+        ids = sorted({str(p["user_id"]) for p in planes})
+        if not ids:
+            return []
+
+        def _resto():
+            admin = cliente.auth.admin
+            usuarios = {}
+            for uid in ids:
+                u = getattr(admin.get_user_by_id(uid), "user", None)
+                if u:
+                    usuarios[uid] = {"email": getattr(u, "email", None), "email_confirmed_at": getattr(u, "email_confirmed_at", None)}
+            perfiles = {str(p["id"]): p for p in (cliente.table("profiles").select("id,first_name").in_("id", ids).execute().data or [])}
+            vuelos = (
+                cliente.table("flights")
+                .select("user_id,date,route")
+                .in_("user_id", ids)
+                .gte("date", (desde - dt.timedelta(days=1)).isoformat())
+                .execute()
+                .data
+                or []
+            )
+            return usuarios, perfiles, vuelos
+
+        usuarios, perfiles, vuelos = await asyncio.to_thread(_resto)
+        return armar_pendientes(planes, usuarios, perfiles, vuelos)
+
+    @post("/enviados", status_code=200)
+    async def marcar(self, request: Request, data: PlanesEnviados) -> Dict[str, int]:
+        """Marca los planes cuyo mail salió: no se vuelven a elegir."""
+        self._verificar(request)
+        if not data.ids:
+            return {"marcados": 0}
+        cliente = SupabaseManager.get_service_client()
+        ahora = dt.datetime.now(dt.timezone.utc).isoformat()
+        resp = await asyncio.to_thread(
+            lambda: cliente.table("planes_de_vuelo")
+            .update({"recordatorio_at": ahora})
+            .in_("id", [str(i) for i in data.ids])
+            .execute()
+        )
+        return {"marcados": len(resp.data or [])}
+

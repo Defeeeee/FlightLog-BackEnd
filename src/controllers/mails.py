@@ -34,7 +34,7 @@ from src.services.mails import BAJA_NOVEDADES, EVENTOS, TIPOS, pendientes_de_nov
 from src.services.resumen_mensual import BAJA as BAJA_RESUMEN
 from src.supabase_client import SupabaseManager
 
-TipoMail = Literal["primer-vuelo", "resumen-mensual", "briefing", "novedades"]
+TipoMail = Literal["primer-vuelo", "resumen-mensual", "briefing", "novedades", "plan-por-registrar"]
 assert set(TipoMail.__args__) == set(TIPOS)
 
 

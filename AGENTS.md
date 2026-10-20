@@ -1514,3 +1514,23 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend. La migración está antes del deploy.
 
 **Verificación:** `test_planes_de_vuelo.py` 25/25, `import src.app` y `ruff --select=E9,F`.
+
+### 2026-10-20 12:04 UTC — Claude (Opus 5.5, vía Claude Code) — El mail "¿Cargamos tu vuelo?" de un plan volado (migración 027)
+
+**Qué cambié:**
+- `migrations/027_plan_por_registrar.sql` (**aplicada en producción**): `planes_de_vuelo.recordatorio_at`, y `mail_envios.tipo` suma `plan-por-registrar`.
+- `src/services/recordatorio_plan.py`: `armar_pendientes`, puro. A un mail sin confirmar no se le escribe, y cada plan va con los vuelos recientes de su piloto.
+- `src/controllers/planes_de_vuelo.py`: `PlanesRecordatoriosController`, con `GET /planes-de-vuelo/recordatorios` y `POST /planes-de-vuelo/recordatorios/enviados`, con el secreto de los barridos.
+  - Elige los planes completos y presentados, sin cerrar ni recordar, con DOF de los últimos dos días.
+  - El POST marca `recordatorio_at`.
+- `src/services/mails.py` y `src/controllers/mails.py`: el tipo nuevo.
+- `test_planes_de_vuelo.py`: 27 checks.
+
+**Por qué:** Federico pidió un mail una hora y media después de la llegada estimada de un plan, para que el piloto vaya a cargar el vuelo. Se usa el mismo reparto que el recordatorio del alta: acá se elige qué planes **pueden** necesitarlo, y el frontend decide con la hora.
+- **La hora la decide el frontend** con `lib/plan-cierre.ts`, la misma cuenta del "¿Ya volaste?" del inicio, ya testeada. Repetirla en Python sería tener dos versiones de "cuándo se llega".
+- **La marca es una columna del plan**, no el `app_metadata` de la cuenta como en el alta: hay un mail por plan, no uno por piloto.
+- **Los vuelos recientes viajan con el plan** para no escribirle a quien ya cargó ese vuelo desde otro lado (el copiloto, la carga a mano).
+
+**Estado:** terminado del lado del backend. El barrido lo corre el crontab del VPS (ver la entrada del frontend).
+
+**Verificación:** `test_planes_de_vuelo.py` 27/27, `test_mails.py`, `import src.app` y `ruff --select=E9,F`. Contra la base real no lo probé; lo prueba la primera corrida del cron.
