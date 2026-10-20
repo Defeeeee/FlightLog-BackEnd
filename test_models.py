@@ -150,6 +150,28 @@ def test_marcar_cerrar_hoja_no_recalcula_el_cobro():
     assert not solo_marcas_del_libro({})
 
 
+def test_las_horas_de_antes_del_alumno():
+    """Migración 028: el desglose de la PPA, con sus partes dentro del todo."""
+    from pydantic import ValidationError
+
+    from src.models.logbook import AperturaPPA, LogbookCreate, LogbookUpdate
+
+    a = AperturaPPA(doble_mando=18.5, solo=4, solo_travesia=1, instruccion_nocturna=2, aterrizajes_nocturnos=6)
+    assert LogbookCreate(name="Mi libro", apertura_ppa=a).apertura_ppa.doble_mando == 18.5
+    assert LogbookUpdate().apertura_ppa is None  # sin tocar, no se cambia
+    for malo in (
+        {"solo": 2, "solo_travesia": 3},  # la parte, más que el todo
+        {"doble_mando": 1, "instruccion_nocturna": 2},
+        {"doble_mando": -1},
+        {"doble_mando": 5000},
+    ):
+        try:
+            AperturaPPA(**malo)
+        except ValidationError:
+            continue
+        raise AssertionError(f"aceptó {malo}")
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -45,6 +45,36 @@ class OpeningBalance(BaseModel):
         )
 
 
+class AperturaPPA(BaseModel):
+    """
+    Las horas de antes de un alumno piloto, con el desglose de RAAC 61.520(a) (migración
+    028). El alumno no lleva libro: sus horas se cuentan contra la PPA, y eso no entra en
+    las columnas `opening_*`, que son las del libro de papel.
+
+    Topes holgados (un alumno no trae mil horas) para que un error de tipeo no quede como
+    dato.
+    """
+
+    doble_mando: float = Field(default=0, ge=0, le=300)
+    #: Vuelo solo, de día (61.520(a)(1)(ii)).
+    solo: float = Field(default=0, ge=0, le=300)
+    #: De las de vuelo solo, cuántas de travesía.
+    solo_travesia: float = Field(default=0, ge=0, le=300)
+    #: De las de doble mando, cuántas de noche (61.520(a)(1)(v)).
+    instruccion_nocturna: float = Field(default=0, ge=0, le=300)
+    aterrizajes_nocturnos: int = Field(default=0, ge=0, le=500)
+    #: Ya hizo la travesía de 150 NM con dos aterrizajes (61.520(a)(1)(iii)).
+    travesia_larga: bool = False
+
+    @model_validator(mode="after")
+    def _partes(self) -> "AperturaPPA":
+        if self.solo_travesia > self.solo:
+            raise ValueError("Las horas de solo de travesía no pueden ser más que las de vuelo solo.")
+        if self.instruccion_nocturna > self.doble_mando:
+            raise ValueError("Las horas de instrucción nocturna no pueden ser más que las de doble mando.")
+        return self
+
+
 class Logbook(BaseModel):
     id: UUID
     user_id: UUID
@@ -70,6 +100,9 @@ class Logbook(BaseModel):
     #: (migración 020). La hoja del Adjunto A de la Res. ANAC 147/2013 tiene 15.
     renglones_por_hoja: int = 15
 
+    #: Las horas de antes de un alumno, con el desglose de la PPA (migración 028).
+    apertura_ppa: Optional[AperturaPPA] = None
+
     #: How many flights point at this logbook. Computed, not stored — the UI
     #: needs it to warn before a delete.
     flight_count: Optional[int] = None
@@ -82,6 +115,7 @@ class LogbookCreate(BaseModel):
     description: Optional[str] = None
     opening: Optional[OpeningBalance] = None
     renglones_por_hoja: Optional[int] = Field(default=None, ge=5, le=40)
+    apertura_ppa: Optional[AperturaPPA] = None
 
 
 class LogbookUpdate(BaseModel):
@@ -89,3 +123,4 @@ class LogbookUpdate(BaseModel):
     description: Optional[str] = None
     opening: Optional[OpeningBalance] = None
     renglones_por_hoja: Optional[int] = Field(default=None, ge=5, le=40)
+    apertura_ppa: Optional[AperturaPPA] = None

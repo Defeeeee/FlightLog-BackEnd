@@ -1534,3 +1534,22 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend. El barrido lo corre el crontab del VPS (ver la entrada del frontend).
 
 **Verificación:** `test_planes_de_vuelo.py` 27/27, `test_mails.py`, `import src.app` y `ruff --select=E9,F`. Contra la base real no lo probé; lo prueba la primera corrida del cron.
+
+### 2026-10-20 12:29 UTC — Claude (Opus 5.5, vía Claude Code) — Las horas de antes del alumno (migración 028)
+
+**Qué cambié:**
+- `migrations/028_apertura_alumno.sql` (**aplicada en producción**): `logbooks.apertura_ppa` (jsonb, con un check de que sea un objeto chico).
+- `src/models/logbook.py`: `AperturaPPA`, con doble mando, solo, solo de travesía, instrucción nocturna, aterrizajes nocturnos y travesía de 150 NM.
+  - Valida que la parte no supere el todo, y topes holgados.
+  - Va en `Logbook`, `LogbookCreate` y `LogbookUpdate`.
+- `src/controllers/logbooks.py`: la guarda al crear y al editar.
+- `test_models.py`: el caso nuevo.
+
+**Por qué:** de 16 cuentas, una sola cargó vuelos. El alta va a ofrecer arrancar con los totales en vez de cargar vuelo por vuelo (pedido de Federico).
+- El piloto copia la fila de totales de su libro en `opening_*`, que ya existían.
+- El alumno no lleva libro: sus horas se cuentan contra RAAC 61.520(a), y ese desglose no entra en las columnas del libro.
+- Se descartó repartirlo entre las `opening_*`: el tracker no podría distinguir doble mando de vuelo solo. Además, por la regla de la migración 022, las horas de alumno no cuentan una vez rendida la PPA, y en `opening_*` seguirían contando.
+
+**Estado:** terminado del lado del backend.
+
+**Verificación:** `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.
