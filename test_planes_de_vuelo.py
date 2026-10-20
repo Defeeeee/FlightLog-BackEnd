@@ -15,6 +15,7 @@ from src.models.plan_vuelo import (
     MAX_FORMULARIO_BYTES,
     FirmaPlanVuelo,
     PlanVueloCreate,
+    PlanVueloResumen,
     PlanVueloUpdate,
     resumen_para_lista,
 )
@@ -64,7 +65,12 @@ check("un envío de prueba o a la oficina se acepta", not falla(lambda: PlanVuel
 check("un envío de otro modo no", falla(lambda: PlanVueloUpdate(envio={"modo": "spam", "a": "x@example.com"})))
 check("un envío sin tipo es del plan", PlanVueloUpdate(envio={"modo": "aro", "a": "x@example.com"}).envio.tipo == "fpl")
 check("una demora se anota como dla", PlanVueloUpdate(envio={"modo": "aro", "tipo": "dla", "a": "x@example.com"}).envio.tipo == "dla")
-check("un tipo inventado no", falla(lambda: PlanVueloUpdate(envio={"modo": "aro", "tipo": "chg", "a": "x@example.com"})))
+check("un tipo inventado no", falla(lambda: PlanVueloUpdate(envio={"modo": "aro", "tipo": "spam", "a": "x@example.com"})))
+check("la cancelación se anota como cnl", PlanVueloUpdate(envio={"modo": "aro", "tipo": "cnl", "a": "x@example.com"}).envio.tipo == "cnl")
+check("cancelar es sólo true", falla(lambda: PlanVueloUpdate(cancelado=False)))
+check("descartar es sólo true", PlanVueloUpdate(descartado=True).descartado is True and falla(lambda: PlanVueloUpdate(descartado=False)))
+check("el vuelo es un uuid", falla(lambda: PlanVueloUpdate(vuelo_id="no-es-uuid")))
+check("la lista trae cómo terminó", {"vuelo_id", "cancelado_at", "descartado_at"} <= set(PlanVueloResumen.model_fields))
 check("la firma tiene que ser un PNG", falla(lambda: FirmaPlanVuelo(png="data:image/jpeg;base64,AAAA")))
 check("un PNG se acepta", not falla(lambda: FirmaPlanVuelo(png="data:image/png;base64,iVBORw0KGgo=")))
 

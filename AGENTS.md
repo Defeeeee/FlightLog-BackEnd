@@ -1496,3 +1496,21 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend.
 
 **Verificación:** `test_planes_de_vuelo.py` 20/20, `import src.app`, `ruff --select=E9,F`.
+
+### 2026-10-20 11:46 UTC — Claude (Opus 5.5, vía Claude Code) — Cómo termina un plan de vuelo (migración 026)
+
+**Qué cambié:**
+- `migrations/026_planes_de_vuelo_cierre.sql` (**aplicada en producción**): `vuelo_id` (FK a `flights`, `on delete set null`), `cancelado_at` y `descartado_at`.
+- `src/models/plan_vuelo.py`: los tres en la lista y en el plan. El PATCH acepta `vuelo_id`, `cancelado: true` y `descartado: true`, y `Envio.tipo` suma `cnl`.
+- `src/controllers/planes_de_vuelo.py`: `vuelo_id` se acepta sólo si el vuelo aparece con el cliente del piloto (RLS de `flights`) y con su `user_id`. Las fechas las pone el servidor.
+- `test_planes_de_vuelo.py`: 25 checks.
+
+**Por qué:** Federico pidió que el inicio pregunte "¿ya volaste?" después de la EOBT más la duración, y que el plan se pueda cancelar (CNL) por mail. Para dejar de preguntar hay que saber cómo terminó cada plan: registrado, cancelado o "no lo volé". Son tres columnas y no un estado, porque cada una es un hecho con su fecha.
+- Un plan cancelado y después volado igual se puede registrar.
+- `cancelado` y `descartado` sólo aceptan `true`: deshacer una cancelación ya mandada a la oficina no se hace con un PATCH, sino presentando otro plan.
+- `vuelo_id` se valida contra `flights` porque la FK sola aceptaría el id de un vuelo de otro piloto.
+- **Un plan sigue sin ser un vuelo:** nada de esto cuenta horas ni cobra saldo.
+
+**Estado:** terminado del lado del backend. La migración está antes del deploy.
+
+**Verificación:** `test_planes_de_vuelo.py` 25/25, `import src.app` y `ruff --select=E9,F`.

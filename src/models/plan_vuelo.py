@@ -95,11 +95,12 @@ MAX_ENVIOS = 20
 class Envio(BaseModel):
     """
     Un envío por mail. `prueba` va al piloto; `aro`, a la oficina con copia al piloto.
-    `tipo`: el plan (`fpl`) o un aviso de demora (`dla`); los anotados antes son del plan.
+    `tipo`: el plan (`fpl`), un aviso de demora (`dla`) o la cancelación (`cnl`); los
+    anotados antes son del plan.
     """
 
     modo: Literal["prueba", "aro"]
-    tipo: Literal["fpl", "dla"] = "fpl"
+    tipo: Literal["fpl", "dla", "cnl"] = "fpl"
     a: str = Field(max_length=200)
     resend_id: Optional[str] = Field(default=None, max_length=100)
     at: Optional[dt.datetime] = None
@@ -118,6 +119,10 @@ class PlanVueloResumen(BaseModel):
     eobt: Optional[str] = None
     descargado_at: Optional[dt.datetime] = None
     enviado_at: Optional[dt.datetime] = None
+    #: Cómo terminó (migración 026): el vuelo registrado, la cancelación o "no lo volé".
+    vuelo_id: Optional[UUID] = None
+    cancelado_at: Optional[dt.datetime] = None
+    descartado_at: Optional[dt.datetime] = None
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -154,6 +159,12 @@ class PlanVueloUpdate(BaseModel):
     demoras: Optional[List[Demora]] = Field(default=None, max_length=3)
     #: Un envío que salió: se suma a la lista con la hora del servidor.
     envio: Optional[Envio] = None
+    #: El vuelo de la bitácora registrado desde este plan (tiene que ser del piloto).
+    vuelo_id: Optional[UUID] = None
+    #: `true` anota la hora del servidor; no se "descancela": para eso se presenta otro plan.
+    cancelado: Optional[Literal[True]] = None
+    #: "No lo volé", desde el inicio.
+    descartado: Optional[Literal[True]] = None
 
     @field_validator("formulario")
     @classmethod

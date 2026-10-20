@@ -22,7 +22,8 @@ from src.models.plan_vuelo import (
 LIMITE_LISTA = 50
 
 COLUMNAS_LISTA = (
-    "id,aircraft_id,completo,salida,destino,matricula,dof,eobt,descargado_at,enviado_at,created_at,updated_at"
+    "id,aircraft_id,completo,salida,destino,matricula,dof,eobt,descargado_at,enviado_at,"
+    "vuelo_id,cancelado_at,descartado_at,created_at,updated_at"
 )
 
 
@@ -98,6 +99,22 @@ class PlanesDeVueloController(Controller):
         if data.descargado:
             # La hora del servidor: que no dependa del reloj del teléfono.
             cambios["descargado_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        if data.vuelo_id is not None:
+            # El RLS de `flights` sólo deja ver los del piloto: si no aparece, no es suyo.
+            vuelo = (
+                supabase_client.table("flights")
+                .select("id")
+                .eq("id", str(data.vuelo_id))
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if not vuelo.data:
+                raise ClientException(detail="Ese vuelo no existe.")
+            cambios["vuelo_id"] = str(data.vuelo_id)
+        if data.cancelado:
+            cambios["cancelado_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        if data.descartado:
+            cambios["descartado_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         if "demoras" in enviados and data.demoras is not None:
             cambios["demoras"] = enviados["demoras"]
         if data.envio is not None:
