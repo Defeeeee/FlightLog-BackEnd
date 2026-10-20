@@ -93,9 +93,13 @@ MAX_ENVIOS = 20
 
 
 class Envio(BaseModel):
-    """Un envío del plan por mail. `prueba` va al piloto; `aro`, a la oficina con copia al piloto."""
+    """
+    Un envío por mail. `prueba` va al piloto; `aro`, a la oficina con copia al piloto.
+    `tipo`: el plan (`fpl`) o un aviso de demora (`dla`); los anotados antes son del plan.
+    """
 
     modo: Literal["prueba", "aro"]
+    tipo: Literal["fpl", "dla"] = "fpl"
     a: str = Field(max_length=200)
     resend_id: Optional[str] = Field(default=None, max_length=100)
     at: Optional[dt.datetime] = None

@@ -1484,3 +1484,15 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend. La migración va antes del deploy.
 
 **Verificación:** `test_planes_de_vuelo.py` 17/17, `import src.app`, `ruff --select=E9,F`.
+
+### 2026-10-20 11:21 UTC — Claude (Opus 5.5, vía Claude Code) — Las demoras también se mandan por mail
+
+**Qué cambié:**
+- `src/models/plan_vuelo.py`: `Envio.tipo` (`fpl` | `dla`), por defecto `fpl`.
+- `test_planes_de_vuelo.py`: 20 checks.
+
+**Por qué:** Federico pidió que el aviso de demora (DLA) salga por mail desde Vector, igual que el plan. La lista de envíos tiene que distinguir uno de otro. Va en el mismo jsonb y sin migración: los envíos anotados antes no tienen `tipo` y se leen como del plan, que es lo que eran. Se descartó una lista aparte de envíos de demoras: el tope de 20 es por plan, cuente lo que cuente.
+
+**Estado:** terminado del lado del backend.
+
+**Verificación:** `test_planes_de_vuelo.py` 20/20, `import src.app`, `ruff --select=E9,F`.

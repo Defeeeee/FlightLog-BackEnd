@@ -62,6 +62,9 @@ check("una hora de demora mal escrita se rechaza", falla(lambda: PlanVueloUpdate
 
 check("un envío de prueba o a la oficina se acepta", not falla(lambda: PlanVueloUpdate(envio={"modo": "prueba", "a": "piloto@example.com"})))
 check("un envío de otro modo no", falla(lambda: PlanVueloUpdate(envio={"modo": "spam", "a": "x@example.com"})))
+check("un envío sin tipo es del plan", PlanVueloUpdate(envio={"modo": "aro", "a": "x@example.com"}).envio.tipo == "fpl")
+check("una demora se anota como dla", PlanVueloUpdate(envio={"modo": "aro", "tipo": "dla", "a": "x@example.com"}).envio.tipo == "dla")
+check("un tipo inventado no", falla(lambda: PlanVueloUpdate(envio={"modo": "aro", "tipo": "chg", "a": "x@example.com"})))
 check("la firma tiene que ser un PNG", falla(lambda: FirmaPlanVuelo(png="data:image/jpeg;base64,AAAA")))
 check("un PNG se acepta", not falla(lambda: FirmaPlanVuelo(png="data:image/png;base64,iVBORw0KGgo=")))
 
