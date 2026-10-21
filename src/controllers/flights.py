@@ -206,20 +206,27 @@ class FlightsController(Controller):
         # become NOT NULL, and a flight with no logbook is invisible in the app.
         if not insert_data.get("logbook_id"):
             insert_data["logbook_id"] = self._default_logbook_id(user_id, supabase_client)
+        # Traído del CAD (migración 030): sólo con el id de allá, y anotado con la hora del server.
+        if insert_data.get("cad_vuelo_id"):
+            insert_data["cad_cargado_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            insert_data["traido_del_cad"] = False
 
         response = supabase_client.table("flights").insert(insert_data).execute()
         flight_obj = Flight(**response.data[0])
 
-        await self._sync_flight_transaction(
-            user_id=str(flight_obj.user_id),
-            flight_id=str(flight_obj.id),
-            duration=float(flight_obj.duration),
-            aircraft_id=str(flight_obj.aircraft_id) if flight_obj.aircraft_id else None,
-            route=flight_obj.route,
-            discount_type=flight_obj.discount_type,
-            discount_amount=flight_obj.discount_amount,
-            supabase_client=supabase_client
-        )
+        # Un vuelo traído del CAD ya se voló (y se pagó): no genera cobro (migración 030).
+        if not flight_obj.traido_del_cad:
+            await self._sync_flight_transaction(
+                user_id=str(flight_obj.user_id),
+                flight_id=str(flight_obj.id),
+                duration=float(flight_obj.duration),
+                aircraft_id=str(flight_obj.aircraft_id) if flight_obj.aircraft_id else None,
+                route=flight_obj.route,
+                discount_type=flight_obj.discount_type,
+                discount_amount=flight_obj.discount_amount,
+                supabase_client=supabase_client
+            )
 
         self._refresh_audit(str(flight_obj.user_id), supabase_client)
         # El ancla de los vencimientos derivados se acaba de mover.
@@ -248,16 +255,18 @@ class FlightsController(Controller):
         if solo_marcas_del_libro(update_data):
             return flight_obj
 
-        await self._sync_flight_transaction(
-            user_id=str(flight_obj.user_id),
-            flight_id=str(flight_obj.id),
-            duration=float(flight_obj.duration),
-            aircraft_id=str(flight_obj.aircraft_id) if flight_obj.aircraft_id else None,
-            route=flight_obj.route,
-            discount_type=flight_obj.discount_type,
-            discount_amount=flight_obj.discount_amount,
-            supabase_client=supabase_client
-        )
+        # Traído del CAD: tampoco cobra al editarlo (migración 030).
+        if not flight_obj.traido_del_cad:
+            await self._sync_flight_transaction(
+                user_id=str(flight_obj.user_id),
+                flight_id=str(flight_obj.id),
+                duration=float(flight_obj.duration),
+                aircraft_id=str(flight_obj.aircraft_id) if flight_obj.aircraft_id else None,
+                route=flight_obj.route,
+                discount_type=flight_obj.discount_type,
+                discount_amount=flight_obj.discount_amount,
+                supabase_client=supabase_client
+            )
 
         self._refresh_audit(str(flight_obj.user_id), supabase_client)
         # El ancla de los vencimientos derivados se acaba de mover.

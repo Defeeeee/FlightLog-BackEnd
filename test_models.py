@@ -176,6 +176,27 @@ def test_las_horas_de_antes_del_alumno():
         raise AssertionError(f"aceptó {malo}")
 
 
+def test_vuelo_traido_del_cad():
+    """Migración 030: el vuelo traído del CAD lleva el id de allá y la marca de no cobrar."""
+    from src.models.flight import FlightCreate, Flight
+
+    base = dict(date="2026-09-30", route="SADF SADF", landings=3, duration=1.9,
+                takeoff="2026-09-30T12:30:00Z", landing="2026-09-30T14:24:00Z")
+    traido = FlightCreate(**base, cad_vuelo_id=831538, traido_del_cad=True).model_dump(by_alias=True, mode="json")
+    assert traido["cad_vuelo_id"] == 831538 and traido["traido_del_cad"] is True
+    # Lo de siempre no cambia: sin id del CAD y cobrando.
+    comun = FlightCreate(**base).model_dump(by_alias=True, mode="json")
+    assert comun["cad_vuelo_id"] is None and comun["traido_del_cad"] is False
+    try:
+        FlightCreate(**base, cad_vuelo_id=0)
+    except Exception:
+        pass
+    else:
+        raise AssertionError("aceptó cad_vuelo_id=0")
+    # Una fila vieja, sin la columna, se lee como "no traído".
+    assert Flight.model_fields["traido_del_cad"].default is False
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

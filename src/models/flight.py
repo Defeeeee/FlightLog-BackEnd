@@ -44,6 +44,8 @@ class Flight(BaseModel):
     #: El id del vuelo en el CAD de ANAC y cuándo se anotó (migración 029).
     cad_vuelo_id: Optional[int] = None
     cad_cargado_at: Optional[datetime] = None
+    #: Traído del CAD a Vector (migración 030): no genera cobro.
+    traido_del_cad: bool = False
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -81,6 +83,9 @@ class FlightCreate(BaseModel):
     purpose: str = "VP"
     remarks: Optional[str] = None
     cierra_hoja: bool = False
+    #: Traído del CAD de ANAC (migración 030): ya está allá, con este id, y no genera cobro.
+    cad_vuelo_id: Optional[int] = Field(default=None, ge=1)
+    traido_del_cad: bool = False
     
     model_config = ConfigDict(populate_by_name=True)
 
