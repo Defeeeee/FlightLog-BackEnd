@@ -215,6 +215,27 @@ def test_vuelo_omitido_del_cad():
         raise AssertionError("aceptó cad_omitido='borrado'")
 
 
+
+def test_autoridad_del_vuelo():
+    """Migración 032: la autoridad del CAD es opcional, acotada, y cambiarla no recalcula."""
+    from src.models.flight import FlightCreate, FlightUpdate
+    from src.controllers.flights import solo_marcas_del_libro
+
+    base = dict(date="2026-09-30", route="SADF SADF", landings=3, duration=1.9,
+                takeoff="2026-09-30T12:30:00Z", landing="2026-09-30T14:24:00Z")
+    c = FlightCreate(**base, cad_autoridad_id=5, cad_autoridad_nombre="JUAN PEREZ").model_dump(by_alias=True, mode="json")
+    assert c["cad_autoridad_id"] == 5 and c["cad_autoridad_nombre"] == "JUAN PEREZ"
+    assert FlightCreate(**base).model_dump(by_alias=True, mode="json")["cad_autoridad_id"] is None
+    assert solo_marcas_del_libro({"cad_autoridad_id": 5, "cad_autoridad_nombre": "X"})
+    assert FlightUpdate(cad_autoridad_id=None).model_dump(exclude_unset=True) == {"cad_autoridad_id": None}
+    for malo in (dict(cad_autoridad_id=0), dict(cad_autoridad_nombre="x" * 121)):
+        try:
+            FlightCreate(**base, **malo)
+        except Exception:
+            continue
+        raise AssertionError(f"aceptó {malo}")
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

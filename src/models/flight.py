@@ -48,6 +48,9 @@ class Flight(BaseModel):
     traido_del_cad: bool = False
     #: Por qué no se pasa al CAD (migración 031): "foliado" o "ignorado". None: pendiente.
     cad_omitido: Optional[str] = None
+    #: Quién certifica el vuelo en el CAD (migración 032): id de la lista del CAD y nombre.
+    cad_autoridad_id: Optional[int] = None
+    cad_autoridad_nombre: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -88,6 +91,9 @@ class FlightCreate(BaseModel):
     #: Traído del CAD de ANAC (migración 030): ya está allá, con este id, y no genera cobro.
     cad_vuelo_id: Optional[int] = Field(default=None, ge=1)
     traido_del_cad: bool = False
+    #: Quién certifica el vuelo en el CAD (migración 032). Opcional.
+    cad_autoridad_id: Optional[int] = Field(default=None, ge=1, le=999)
+    cad_autoridad_nombre: Optional[str] = Field(default=None, max_length=120)
     
     model_config = ConfigDict(populate_by_name=True)
 
@@ -125,5 +131,8 @@ class FlightUpdate(BaseModel):
     cad_vuelo_id: Optional[int] = Field(default=None, ge=1)
     #: Por qué no se pasa al CAD (migración 031). Mandar null lo devuelve a la lista.
     cad_omitido: Optional[Literal["foliado", "ignorado"]] = None
+    #: Quién certifica el vuelo en el CAD (migración 032). Null lo borra.
+    cad_autoridad_id: Optional[int] = Field(default=None, ge=1, le=999)
+    cad_autoridad_nombre: Optional[str] = Field(default=None, max_length=120)
 
     model_config = ConfigDict(populate_by_name=True)
