@@ -10,7 +10,7 @@ from src.services import audit_engine, derived_expiries
 
 #: Lo que un vuelo guarda sólo para el libro en papel (migración 020): cambiarlo no
 #: toca el cobro, la auditoría ni los vencimientos derivados.
-MARCAS_DEL_LIBRO = frozenset({"cierra_hoja", "cad_vuelo_id", "cad_cargado_at"})
+MARCAS_DEL_LIBRO = frozenset({"cierra_hoja", "cad_vuelo_id", "cad_cargado_at", "cad_omitido"})
 
 
 def solo_marcas_del_libro(cambios: Dict[str, Any]) -> bool:

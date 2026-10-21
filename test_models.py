@@ -197,6 +197,24 @@ def test_vuelo_traido_del_cad():
     assert Flight.model_fields["traido_del_cad"].default is False
 
 
+
+def test_vuelo_omitido_del_cad():
+    """Migración 031: "foliado" o "ignorado", null para deshacer; es una marca y no recalcula."""
+    from src.models.flight import FlightUpdate
+    from src.controllers.flights import solo_marcas_del_libro
+
+    assert FlightUpdate(cad_omitido="foliado").model_dump(exclude_unset=True) == {"cad_omitido": "foliado"}
+    assert FlightUpdate(cad_omitido=None).model_dump(exclude_unset=True) == {"cad_omitido": None}
+    assert solo_marcas_del_libro({"cad_omitido": "ignorado"})
+    assert solo_marcas_del_libro({"cad_omitido": None})
+    try:
+        FlightUpdate(cad_omitido="borrado")
+    except Exception:
+        pass
+    else:
+        raise AssertionError("aceptó cad_omitido='borrado'")
+
+
 if __name__ == "__main__":
     fallos = 0
     for nombre, fn in sorted(globals().items()):

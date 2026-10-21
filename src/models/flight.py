@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Any
+from typing import Literal, Optional, Any
 from datetime import date, datetime
 from uuid import UUID
 
@@ -46,6 +46,8 @@ class Flight(BaseModel):
     cad_cargado_at: Optional[datetime] = None
     #: Traído del CAD a Vector (migración 030): no genera cobro.
     traido_del_cad: bool = False
+    #: Por qué no se pasa al CAD (migración 031): "foliado" o "ignorado". None: pendiente.
+    cad_omitido: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -121,5 +123,7 @@ class FlightUpdate(BaseModel):
     cierra_hoja: Optional[bool] = None
     #: El id del vuelo en el CAD de ANAC (migración 029). La hora la pone el servidor.
     cad_vuelo_id: Optional[int] = Field(default=None, ge=1)
+    #: Por qué no se pasa al CAD (migración 031). Mandar null lo devuelve a la lista.
+    cad_omitido: Optional[Literal["foliado", "ignorado"]] = None
 
     model_config = ConfigDict(populate_by_name=True)
