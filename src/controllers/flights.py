@@ -3,13 +3,14 @@ from litestar.exceptions import NotFoundException
 from supabase import Client
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+from datetime import datetime, timezone
 from src.models.flight import Flight, FlightCreate, FlightUpdate
 from src.auth.guards import auth_guard
 from src.services import audit_engine, derived_expiries
 
 #: Lo que un vuelo guarda sólo para el libro en papel (migración 020): cambiarlo no
 #: toca el cobro, la auditoría ni los vencimientos derivados.
-MARCAS_DEL_LIBRO = frozenset({"cierra_hoja"})
+MARCAS_DEL_LIBRO = frozenset({"cierra_hoja", "cad_vuelo_id", "cad_cargado_at"})
 
 
 def solo_marcas_del_libro(cambios: Dict[str, Any]) -> bool:
@@ -232,6 +233,9 @@ class FlightsController(Controller):
         user_id = str(request.state.user.id)
         # Use mode="json" for serialization and by_alias=True for DB column names
         update_data = data.model_dump(exclude_unset=True, by_alias=True, mode="json")
+        # Pasado al CAD (migración 029): la hora es la del servidor, no la del navegador.
+        if update_data.get("cad_vuelo_id"):
+            update_data["cad_cargado_at"] = datetime.now(timezone.utc).isoformat()
 
         response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:

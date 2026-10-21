@@ -41,6 +41,9 @@ class Flight(BaseModel):
     #: Este vuelo es el último renglón de su hoja en el libro de papel: lo que queda en
     #: blanco se tacha (migración 020). Lo usa el PDF del libro.
     cierra_hoja: bool = False
+    #: El id del vuelo en el CAD de ANAC y cuándo se anotó (migración 029).
+    cad_vuelo_id: Optional[int] = None
+    cad_cargado_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -111,5 +114,7 @@ class FlightUpdate(BaseModel):
     discount_amount: Optional[float] = None
     purpose: Optional[str] = None
     cierra_hoja: Optional[bool] = None
+    #: El id del vuelo en el CAD de ANAC (migración 029). La hora la pone el servidor.
+    cad_vuelo_id: Optional[int] = Field(default=None, ge=1)
 
     model_config = ConfigDict(populate_by_name=True)

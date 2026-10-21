@@ -1553,3 +1553,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend.
 
 **Verificación:** `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.
+
+### 2026-10-21 12:05 UTC — Claude (Opus 5.5, vía Claude Code) — Qué vuelos ya están en el CAD (migración 029)
+
+**Qué cambié:**
+- `migrations/029_vuelos_en_el_cad.sql` (**aplicada en producción**): `flights.cad_vuelo_id` (el `vueloTripulanteID` del CAD) y `flights.cad_cargado_at`.
+- `src/models/flight.py`: los dos en `Flight`, y `cad_vuelo_id` en `FlightUpdate`.
+- `src/controllers/flights.py`: son marcas del libro, como `cierra_hoja`. El PATCH que sólo las cambia no recalcula el cobro, la auditoría ni los vencimientos. `cad_cargado_at` lo pone el servidor.
+- `test_models.py`: el caso.
+
+**Por qué:** Vector pasa los vuelos al CAD de ANAC desde el navegador del piloto, con su sesión del CAD (ver la bitácora del frontend, 2026-10-21). El CAD devuelve el id del vuelo creado y acá se guarda, para no volver a mandarlo y para mostrar cuáles faltan. Se descartó una tabla aparte: es un dato por vuelo, y como marca del libro reusa el camino que ya no toca el cobro.
+
+**Estado:** terminado del lado del backend.
+
+**Verificación:** `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.

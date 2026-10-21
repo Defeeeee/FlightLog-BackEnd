@@ -146,6 +146,10 @@ def test_marcar_cerrar_hoja_no_recalcula_el_cobro():
 
     assert solo_marcas_del_libro({"cierra_hoja": True})
     assert not solo_marcas_del_libro({"cierra_hoja": True, "duration": 1.2})
+    # Pasado al CAD (migración 029): también es sólo una marca, no recalcula el cobro.
+    assert solo_marcas_del_libro({"cad_vuelo_id": 831538, "cad_cargado_at": "2026-10-21T12:00:00+00:00"})
+    from src.models.flight import FlightUpdate as _FU
+    assert _FU(cad_vuelo_id=831538).model_dump(exclude_unset=True) == {"cad_vuelo_id": 831538}
     assert not solo_marcas_del_libro({"route": "SADF SAAR"})
     assert not solo_marcas_del_libro({})
 
