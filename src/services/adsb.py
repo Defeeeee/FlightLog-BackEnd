@@ -5,7 +5,8 @@ del tráfico en vivo son nuestros y qué posiciones vale la pena guardar.
 El grabador (`grabador_adsb.py`) le pide a adsb.lol el tráfico alrededor de Buenos Aires
 cada pocos segundos. Un avión es nuestro si su indicativo es la matrícula de algún Hangar sin
 el guión (`LVS114`, así transmiten los livianos de escuela) o si su código ADS-B ya se
-aprendió de una vez anterior (por si un día no manda el indicativo).
+aprendió de una vez anterior (por si un día no manda el indicativo), o si la fuente trae la
+matrícula de su base (`r`, adsb.fi).
 """
 
 from __future__ import annotations
@@ -55,8 +56,12 @@ def nuestros(trafico: Iterable[dict], matriculas: Set[str], hex_conocidos: Dict[
         if not h:
             continue
         por_indicativo = normalizar_matricula(a.get("flight"))
+        # adsb.fi trae la matrícula de su base (`r`) cuando la conoce, aunque no haya indicativo.
+        por_registro = normalizar_matricula(a.get("r"))
         if por_indicativo in matriculas:
             salida.append((por_indicativo, h, a))
+        elif por_registro in matriculas:
+            salida.append((por_registro, h, a))
         elif h in hex_conocidos:
             salida.append((hex_conocidos[h], h, a))
     return salida
@@ -123,6 +128,7 @@ def latido_del_grabador(ruta: str, ahora: datetime) -> Dict:
         "ok": bool(d.get("ok")),
         "trafico": d.get("trafico"),
         "nuestros_en_el_aire": d.get("nuestros_en_el_aire"),
+        "fuente": d.get("fuente"),
         "vueltas_ok": d.get("vueltas_ok"),
         "vueltas_fallidas": d.get("vueltas_fallidas"),
         **({"ultimo_error": d["ultimo_error"]} if d.get("ultimo_error") else {}),

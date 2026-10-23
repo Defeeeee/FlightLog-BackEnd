@@ -1625,3 +1625,21 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado.
 
 **Verificación:** `test_adsb.py` 20/20, `ruff` e `import`. En producción, ver la entrada siguiente o `GET /health`.
+
+### 2026-10-23 20:47 UTC — Claude Code / Opus 5.5 — El grabador ADS-B pasa a adsb.fi (adsb.lol le daba 429 al VPS)
+
+**Qué cambié:**
+- `grabador_adsb.py`: `FUENTES` en orden, adsb.fi (`/api/v3/lat/…/lon/…/dist/…`) y adsb.lol de respaldo. El latido dice cuál se usó, cuántas vueltas salen y el último error con su código HTTP. Ante un 429 espera lo que diga `Retry-After`, con un mínimo de 20 s.
+- `src/services/adsb.py`: un avión también se reconoce por la matrícula que trae la fuente (`r`), además del indicativo y el código aprendido.
+- `test_adsb.py`: 21 casos.
+
+**Por qué:**
+- El LV-S114 y el LV-S048 volaron esta tarde y quedaron 7 posiciones en dos horas.
+- El latido mostró **429** en casi todas las vueltas, sin `Retry-After`, aun bajando a una cada 20 s: 1 de cada 10 salía. Desde la Mac, adsb.lol contestaba todas cada 10 s, así que el límite es para la IP del VPS.
+- adsb.fi contesta con el mismo formato y trae la matrícula. Su límite es 1 pedido por segundo y se usa 1 cada 10 s.
+- **Sus términos:** "personal, non-commercial use", citarlos con un link, y que se les escriba para uso comercial. Hoy Vector no cobra. **Si cobra, hay que escribirles o tener un receptor propio**, que además da acceso como feeder.
+- airplanes.live pide escribirles antes de usar su API (403).
+
+**Estado:** desplegado; falta ver en `/health` que las vueltas salgan.
+
+**Verificación:** `test_adsb.py` 21/21. Una vuelta real contra adsb.fi encontró el LVS114 en vuelo (`e200b9`, 1225 pies, 82 kt).

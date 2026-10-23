@@ -40,6 +40,8 @@ encontrados = nuestros(trafico, hangar, hex_conocidos={"e0cccc": "LVS100"})
 check("encuentra el avión por el indicativo", ("LVS114", "e120da") in [(m, h) for m, h, _ in encontrados])
 check("y por el código aprendido aunque no mande indicativo", ("LVS100", "e0cccc") in [(m, h) for m, h, _ in encontrados])
 check("un avión ajeno no entra", len(encontrados) == 2)
+por_r = nuestros([{"hex": "e0dddd", "flight": "", "r": "LV-S114", "lat": 1, "lon": 1}], hangar, {})
+check("y por la matrícula que trae la fuente (`r`)", [(m, h) for m, h, _ in por_r] == [("LVS114", "e0dddd")])
 
 ahora = datetime(2026, 10, 23, 15, 0, 0, tzinfo=timezone.utc)
 p = posicion(trafico[0], ahora)

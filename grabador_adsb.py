@@ -7,12 +7,12 @@ aviones que están en algún Hangar.
 Corre en el VPS como su propio proceso de PM2 (`grabador-adsb`), al lado del backend; el
 deploy lo reinicia (`.github/workflows/deploy.yml`).
 
-- Cada 10 s pide a adsb.lol el tráfico alrededor de cada punto de `ADSB_PUNTOS` (por defecto,
+- Cada 10 s pide a adsb.fi (y si falla, a adsb.lol) el tráfico alrededor de cada punto de `ADSB_PUNTOS` (por defecto,
   Buenos Aires con 250 millas): un pedido por punto, no uno por avión.
 - Cada 10 min relee las matrículas de los Hangares y los códigos ya aprendidos.
 - Una vez por hora borra lo que tiene más de 30 días.
 
-Los datos son de adsb.lol (ODbL). Si adsb.lol no contesta, espera y sigue: no hay nada que
+Los datos son de adsb.fi (uso no comercial, con cita) o de adsb.lol (ODbL). Si no contestan, espera y sigue: no hay nada que
 recuperar, lo que no se vio no se vio.
 """
 
@@ -33,7 +33,14 @@ from src.supabase_client import SupabaseManager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("grabador-adsb")
 
-API = "https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}"
+#: Las fuentes, en orden: si la primera falla, la siguiente. adsb.fi (2026-10-23): adsb.lol
+#: le contestaba 429 a la IP del VPS casi siempre, aun a un pedido cada 20 s. adsb.fi es
+#: "para uso personal y no comercial", con cita y link: si Vector cobra, hay que escribirles
+#: o tener un receptor propio. Las dos responden con el formato de la v2 de ADSBexchange.
+FUENTES = [
+    ("adsb.fi", "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{radio}"),
+    ("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}"),
+]
 CADA = 10
 RELEER_CADA = 600
 LIMPIAR_CADA = 3600
@@ -83,8 +90,14 @@ def main() -> None:
 
             trafico: Dict[str, dict] = {}
             for lat, lon, radio in puntos():
-                r = http.get(API.format(lat=lat, lon=lon, radio=radio))
-                r.raise_for_status()
+                for i, (fuente, url) in enumerate(FUENTES):
+                    r = http.get(url.format(lat=lat, lon=lon, radio=radio))
+                    if r.status_code != 200 and i < len(FUENTES) - 1:
+                        log.info("%s contestó %s: pruebo la siguiente", fuente, r.status_code)
+                        continue
+                    r.raise_for_status()
+                    latido["fuente"] = fuente
+                    break
                 for a in r.json().get("ac") or []:
                     trafico[str(a.get("hex"))] = a
             ahora = datetime.now(timezone.utc)
