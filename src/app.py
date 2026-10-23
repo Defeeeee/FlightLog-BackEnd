@@ -34,6 +34,7 @@ from src.controllers.admin import AdminController
 from src.controllers.onboarding import OnboardingController, OnboardingEstadoController
 from src.controllers.resumen_mensual import ResumenMensualController
 from src.controllers.mails import MailsController
+from src.controllers.qr import QrController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -120,6 +121,8 @@ api_router = Router(
         OnboardingEstadoController,
         ResumenMensualController,
         MailsController,
+        # Las pegatinas con QR: el escaneo (con el secreto) y el origen de una cuenta.
+        QrController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

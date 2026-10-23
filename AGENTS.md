@@ -1567,3 +1567,25 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado del lado del backend.
 
 **Verificación:** `test_models.py` sin fallos, `import src.app` y `ruff --select=E9,F`.
+
+### 2026-10-23 14:21 UTC — Claude Code / Opus 5.5 — Las pegatinas con QR (migración 033)
+
+**Qué cambié:**
+- `migrations/033_pegatinas_qr.sql`:
+  - `qr_codigos` (código, dónde se pegó, lote) y `qr_escaneos` (cuándo y si había sesión: sin IP ni datos de quien escanea), las dos sólo del service role;
+  - `profiles.origen_qr`, la pegatina de la que vino la cuenta.
+- `src/services/qr.py` (nuevo, puro): genera códigos sin caracteres ambiguos, decide si una cuenta es atribuible a un escaneo (creada después y dentro de los 30 días) y arma las filas del panel.
+- `src/controllers/qr.py` (nuevo):
+  - `POST /qr/escaneos`, con `X-Cron-Secret`, lo llama la ruta `/q/[codigo]` del frontend;
+  - `POST /qr/origen`, con sesión: no pisa un origen ya anotado y lee la fecha de alta de auth.
+- `src/controllers/admin.py`: `GET/POST /admin/qr` y `GET/PATCH /admin/qr/{codigo}`, 404 para quien no está en `ADMINS_RED`.
+- `src/app.py`: registra `QrController`.
+- `test_qr.py` (nuevo) y `.github/workflows/ci.yml`: 17 casos.
+
+**Por qué:** Federico imprime muchas pegatinas iguales, cada una con su código, y las asigna después a un lugar escaneándolas. Quiere saber cuántos llegan y cuántas cuentas salen de cada una (ver la bitácora del frontend, 2026-10-23). Que una cuenta sea de una pegatina lo decide el backend con la fecha de alta, no el navegador.
+
+**Estado:** terminado. La migración 033 está **aplicada en producción** (OK de Federico, 2026-10-23). Sólo el service role tiene permisos sobre las dos tablas: verificado en `role_table_grants`.
+
+**Verificación:**
+- `test_qr.py` 17/17 e `import src.app`.
+- Del lado del frontend, el recorrido entero contra el backend falso.

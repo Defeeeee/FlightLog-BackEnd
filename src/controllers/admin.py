@@ -20,13 +20,15 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
-from litestar import Controller, Request, get
+from litestar import Controller, Request, get, patch, post
 from litestar.exceptions import HTTPException, NotFoundException
+from pydantic import BaseModel, Field
 
 from src.auth.guards import auth_guard
 from src.controllers.social import _yo
 from src.services.avisos import admins
 from src.services.estadisticas import Crudos, armar
+from src.services import qr
 from src.supabase_client import SupabaseManager
 
 log = logging.getLogger(__name__)
@@ -115,6 +117,21 @@ async def leer_crudos() -> Crudos:
     return crudos
 
 
+class LoteQr(BaseModel):
+    cantidad: int = Field(ge=1, le=200)
+    lote: str | None = Field(default=None, max_length=40)
+
+
+class AsignacionQr(BaseModel):
+    # Dónde se pegó. Vacío la desasigna.
+    etiqueta: str | None = Field(default=None, max_length=80)
+
+
+def _admin_o_404(request: Request) -> None:
+    if _yo(request) not in admins():
+        raise NotFoundException()
+
+
 class AdminController(Controller):
     path = "/admin"
     guards = [auth_guard]
@@ -129,3 +146,69 @@ class AdminController(Controller):
         if "usuarios" in crudos.no_disponible:
             raise HTTPException(status_code=503, detail="No se pudieron leer las cuentas.")
         return armar(crudos, datetime.now(timezone.utc), excluir=set() if incluir_admins else set(lista))
+
+    # --- Las pegatinas con QR (migración 033, `services/qr.py`) ---
+
+    @get("/qr")
+    async def pegatinas(self, request: Request) -> Dict[str, Any]:
+        """Cada pegatina con dónde está, sus escaneos y las cuentas que salieron de ella."""
+        _admin_o_404(request)
+        codigos, escaneos, origenes = await asyncio.gather(
+            asyncio.to_thread(_todas, "qr_codigos", "codigo,etiqueta,lote,creado_at,asignado_at"),
+            asyncio.to_thread(_todas, "qr_escaneos", "codigo,con_sesion,creado_at"),
+            asyncio.to_thread(lambda: SupabaseManager.get_service_client().table("profiles").select("origen_qr").not_.is_("origen_qr", "null").execute().data or []),
+        )
+        return {"pegatinas": qr.panel(codigos, escaneos, origenes)}
+
+    @post("/qr", status_code=200)
+    async def crear_pegatinas(self, request: Request, data: LoteQr) -> Dict[str, List[str]]:
+        """Un lote de códigos nuevos, para imprimir. Se asignan después, escaneándolos."""
+        _admin_o_404(request)
+
+        def _crear() -> List[str]:
+            existentes = [c["codigo"] for c in _todas("qr_codigos", "codigo")]
+            nuevos = qr.generar(data.cantidad, existentes)
+            lote = (data.lote or "").strip() or None
+            SupabaseManager.get_service_client().table("qr_codigos").insert(
+                [{"codigo": c, "lote": lote} for c in nuevos]
+            ).execute()
+            return nuevos
+
+        return {"codigos": await asyncio.to_thread(_crear)}
+
+    @get("/qr/{codigo:str}")
+    async def pegatina(self, request: Request, codigo: str) -> Dict[str, Any]:
+        _admin_o_404(request)
+        c = qr.normalizar(codigo)
+
+        def _leer() -> Dict[str, Any] | None:
+            cliente = SupabaseManager.get_service_client()
+            filas = cliente.table("qr_codigos").select("codigo,etiqueta,lote,creado_at,asignado_at").eq("codigo", c).limit(1).execute().data or []
+            if not filas:
+                return None
+            escaneos = cliente.table("qr_escaneos").select("codigo,con_sesion,creado_at").eq("codigo", c).execute().data or []
+            origenes = cliente.table("profiles").select("origen_qr").eq("origen_qr", c).execute().data or []
+            return qr.panel(filas, escaneos, origenes)[0]
+
+        fila = await asyncio.to_thread(_leer) if c else None
+        if not fila:
+            raise NotFoundException()
+        return fila
+
+    @patch("/qr/{codigo:str}")
+    async def asignar_pegatina(self, request: Request, codigo: str, data: AsignacionQr) -> Dict[str, Any]:
+        _admin_o_404(request)
+        c = qr.normalizar(codigo)
+        etiqueta = (data.etiqueta or "").strip() or None
+
+        def _asignar() -> bool:
+            r = (
+                SupabaseManager.get_service_client().table("qr_codigos")
+                .update({"etiqueta": etiqueta, "asignado_at": datetime.now(timezone.utc).isoformat() if etiqueta else None})
+                .eq("codigo", c).execute()
+            )
+            return bool(r.data)
+
+        if not c or not await asyncio.to_thread(_asignar):
+            raise NotFoundException()
+        return {"codigo": c, "etiqueta": etiqueta}
