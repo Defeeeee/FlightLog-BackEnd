@@ -1589,3 +1589,25 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Verificación:**
 - `test_qr.py` 17/17 e `import src.app`.
 - Del lado del frontend, el recorrido entero contra el backend falso.
+
+### 2026-10-23 15:58 UTC — Claude Code / Opus 5.5 — El grabador ADS-B, etapa 1: medir (migración 034)
+
+**Qué cambié:**
+- `migrations/034_adsb.sql` (**aplicada en producción**), las dos tablas sólo del service role:
+  - `adsb_aviones`: el código ADS-B de cada matrícula, aprendido al verla;
+  - `adsb_posiciones`: las posiciones, que se borran a los 30 días.
+- `src/services/adsb.py` (nuevo, puro): normaliza las matrículas, decide qué aviones del tráfico son de algún Hangar (por el indicativo `LVS114` o por el código ya aprendido), arma la posición con la hora real (`seen_pos`) y no guarda un avión quieto cada 10 s.
+- `grabador_adsb.py` (nuevo): cada 10 s pide a adsb.lol el tráfico a 250 millas de Buenos Aires (`ADSB_PUNTOS` para sumar zonas), relee los Hangares cada 10 min y limpia cada hora. Un proceso de PM2 propio, `grabador-adsb`.
+- `.github/workflows/deploy.yml`: después del health check, crea o reinicia `grabador-adsb` y hace `pm2 save`.
+- `test_adsb.py` (16 casos) y su paso en el CI.
+
+**Por qué:**
+- Federico quiere los horarios y el recorrido reales del vuelo sin cargarlos. Sus aviones (LVS114, LVS100, LVS048) aparecen en ADS-B, y los livianos transmiten la matrícula como indicativo aunque no estén en las bases de códigos.
+- **El historial no se puede pedir:** adsb.lol lo bloquea a programas (403) y el de ADS-B Exchange es pago, con términos que no lo permiten. Por eso se graba en vivo, de la API abierta de adsb.lol (ODbL, hay que citarla), y sólo de aviones que están en algún Hangar.
+- Un pedido por zona y no uno por avión: con 25 aviones en 250 millas, la respuesta pesa unos 15 KB.
+
+**Estado:** etapa 1, sólo graba y no se muestra nada. En una semana se mide si los vuelos de Federico quedan enteros, sobre todo el despegue y el aterrizaje en SADF, donde a baja altura puede perderse la señal. Si sirve, la etapa 2 es la sugerencia de horarios en Registrar vuelo y el mapa del vuelo.
+
+**Verificación:**
+- `test_adsb.py` 16/16 y `ruff`.
+- Una prueba en vivo con la API: el LVRCZ (agregado sólo para la prueba) salió encontrado, con posición, altura y velocidad.

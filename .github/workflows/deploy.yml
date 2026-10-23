@@ -69,6 +69,14 @@ jobs:
             for i in $(seq 1 15); do
               if curl -fsS http://localhost:7477/api/health > /dev/null; then
                 echo "Health OK tras ${i}s"
+                # El grabador ADS-B (migración 034): su propio proceso de PM2, al lado del
+                # backend. La primera vez se crea; después se reinicia con el código nuevo.
+                if pm2 describe grabador-adsb > /dev/null 2>&1; then
+                  pm2 restart grabador-adsb --update-env
+                else
+                  pm2 start grabador_adsb.py --name grabador-adsb --interpreter "$PWD/$(dirname "$PIP")/python" --cwd "$PWD"
+                fi
+                pm2 save > /dev/null || true
                 exit 0
               fi
               sleep 1

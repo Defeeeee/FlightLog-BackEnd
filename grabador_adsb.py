@@ -1,0 +1,102 @@
+"""
+El grabador ADS-B (migración 034, `services/adsb.py`): graba en vivo las posiciones de los
+aviones que están en algún Hangar.
+
+    venv/bin/python grabador_adsb.py
+
+Corre en el VPS como su propio proceso de PM2 (`grabador-adsb`), al lado del backend; el
+deploy lo reinicia (`.github/workflows/deploy.yml`).
+
+- Cada 10 s pide a adsb.lol el tráfico alrededor de cada punto de `ADSB_PUNTOS` (por defecto,
+  Buenos Aires con 250 millas): un pedido por punto, no uno por avión.
+- Cada 10 min relee las matrículas de los Hangares y los códigos ya aprendidos.
+- Una vez por hora borra lo que tiene más de 30 días.
+
+Los datos son de adsb.lol (ODbL). Si adsb.lol no contesta, espera y sigue: no hay nada que
+recuperar, lo que no se vio no se vio.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import time
+from datetime import datetime, timezone
+from typing import Dict, List, Tuple
+
+import httpx
+
+from src.services.adsb import limite_de_retencion, matriculas_del_hangar, nuestros, posicion, vale_guardar
+from src.supabase_client import SupabaseManager
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("grabador-adsb")
+
+API = "https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}"
+CADA = 10
+RELEER_CADA = 600
+LIMPIAR_CADA = 3600
+UA = "Vector (vector.fdiaznem.com.ar; bitacora de vuelo; contacto fdiaznemeth@gmail.com)"
+
+
+def puntos() -> List[Tuple[float, float, int]]:
+    crudo = os.getenv("ADSB_PUNTOS", "-34.6,-58.6,250")
+    salida = []
+    for p in crudo.split(";"):
+        lat, lon, radio = p.split(",")
+        salida.append((float(lat), float(lon), min(int(radio), 250)))
+    return salida
+
+
+def releer(cliente) -> Tuple[set, Dict[str, str]]:
+    aviones = cliente.table("aircraft").select("registration,is_simulator").execute().data or []
+    conocidos = cliente.table("adsb_aviones").select("matricula,hex").execute().data or []
+    return matriculas_del_hangar(aviones), {c["hex"]: c["matricula"] for c in conocidos}
+
+
+def main() -> None:
+    cliente = SupabaseManager.get_service_client()
+    http = httpx.Client(timeout=8, headers={"User-Agent": UA})
+    matriculas, hex_conocidos = releer(cliente)
+    log.info("arranco: %d matrículas, %d códigos conocidos, puntos %s", len(matriculas), len(hex_conocidos), puntos())
+    ultimas: Dict[str, dict] = {}
+    releido = limpiado = 0.0
+
+    while True:
+        inicio = time.monotonic()
+        try:
+            if inicio - releido > RELEER_CADA:
+                matriculas, hex_conocidos = releer(cliente)
+                releido = inicio
+            if inicio - limpiado > LIMPIAR_CADA:
+                cliente.table("adsb_posiciones").delete().lt("visto_at", limite_de_retencion(datetime.now(timezone.utc))).execute()
+                limpiado = inicio
+
+            trafico: Dict[str, dict] = {}
+            for lat, lon, radio in puntos():
+                r = http.get(API.format(lat=lat, lon=lon, radio=radio))
+                r.raise_for_status()
+                for a in r.json().get("ac") or []:
+                    trafico[str(a.get("hex"))] = a
+            ahora = datetime.now(timezone.utc)
+
+            filas = []
+            for matricula, h, a in nuestros(trafico.values(), matriculas, hex_conocidos):
+                if hex_conocidos.get(h) != matricula:
+                    cliente.table("adsb_aviones").upsert({"matricula": matricula, "hex": h, "visto_at": ahora.isoformat()}).execute()
+                    hex_conocidos[h] = matricula
+                    log.info("aprendí %s = %s", matricula, h)
+                p = posicion(a, ahora)
+                if p and vale_guardar(p, ultimas.get(h)):
+                    filas.append({"matricula": matricula, "hex": h, **p})
+                    ultimas[h] = p
+            if filas:
+                cliente.table("adsb_posiciones").insert(filas).execute()
+        except Exception as e:  # una vuelta fallida no tira abajo el grabador
+            log.warning("vuelta fallida: %r", e)
+            time.sleep(20)
+        time.sleep(max(0.0, CADA - (time.monotonic() - inicio)))
+
+
+if __name__ == "__main__":
+    main()
