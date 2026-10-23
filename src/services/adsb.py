@@ -123,5 +123,7 @@ def latido_del_grabador(ruta: str, ahora: datetime) -> Dict:
         "ok": bool(d.get("ok")),
         "trafico": d.get("trafico"),
         "nuestros_en_el_aire": d.get("nuestros_en_el_aire"),
-        **({"error": d["error"]} if d.get("error") else {}),
+        "vueltas_ok": d.get("vueltas_ok"),
+        "vueltas_fallidas": d.get("vueltas_fallidas"),
+        **({"ultimo_error": d["ultimo_error"]} if d.get("ultimo_error") else {}),
     }

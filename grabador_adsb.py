@@ -65,10 +65,14 @@ def main() -> None:
     log.info("arranco: %d matrículas, %d códigos conocidos, puntos %s", len(matriculas), len(hex_conocidos), puntos())
     ultimas: Dict[str, dict] = {}
     releido = limpiado = 0.0
+    # Para medir desde `/health` cuántas vueltas salen y por qué fallan las otras.
+    cuenta = {"vueltas_ok": 0, "vueltas_fallidas": 0}
+    ultimo_error: Dict[str, object] = {}
 
     while True:
         inicio = time.monotonic()
-        latido = {"vuelta": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": False}
+        latido: Dict[str, object] = {"vuelta": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": False}
+        espera = 0.0
         try:
             if inicio - releido > RELEER_CADA:
                 matriculas, hex_conocidos = releer(cliente)
@@ -98,16 +102,32 @@ def main() -> None:
             if filas:
                 cliente.table("adsb_posiciones").insert(filas).execute()
             latido.update(ok=True, trafico=len(trafico), nuestros_en_el_aire=len(filas), matriculas=len(matriculas))
+            cuenta["vueltas_ok"] += 1
+        except httpx.HTTPStatusError as e:
+            # adsb.lol limita los pedidos: si dice cuánto esperar, se espera eso.
+            cuenta["vueltas_fallidas"] += 1
+            r = e.response
+            ultimo_error = {"cuando": latido["vuelta"], "http": r.status_code, "retry_after": r.headers.get("retry-after"), "cuerpo": r.text[:160]}
+            log.warning("adsb.lol contestó %s: %s", r.status_code, r.text[:160])
+            try:
+                espera = float(r.headers.get("retry-after") or 0)
+            except ValueError:
+                espera = 0.0
+            espera = min(max(espera, 20.0), 300.0)
         except Exception as e:  # una vuelta fallida no tira abajo el grabador
+            cuenta["vueltas_fallidas"] += 1
+            ultimo_error = {"cuando": latido["vuelta"], "tipo": type(e).__name__, "detalle": str(e)[:160]}
             log.warning("vuelta fallida: %r", e)
-            latido["error"] = type(e).__name__
-            time.sleep(20)
+            espera = 20.0
+        latido.update(cuenta)
+        if ultimo_error:
+            latido["ultimo_error"] = ultimo_error
         try:
             with open(LATIDO, "w") as f:
                 json.dump(latido, f)
         except OSError:
             pass
-        time.sleep(max(0.0, CADA - (time.monotonic() - inicio)))
+        time.sleep(espera or max(0.0, CADA - (time.monotonic() - inicio)))
 
 
 if __name__ == "__main__":
