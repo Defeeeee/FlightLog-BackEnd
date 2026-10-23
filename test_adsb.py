@@ -7,7 +7,11 @@ Offline. `python test_adsb.py`; sale con código 1 si algo falla.
 import sys
 from datetime import datetime, timezone
 
-from src.services.adsb import matriculas_del_hangar, normalizar_matricula, nuestros, posicion, vale_guardar
+import json
+import os
+import tempfile
+
+from src.services.adsb import latido_del_grabador, matriculas_del_hangar, normalizar_matricula, nuestros, posicion, vale_guardar
 
 resultados = []
 
@@ -52,6 +56,17 @@ check("la misma posición repetida, no", not vale_guardar(dict(base), base))
 check("quieto y al rato, no", not vale_guardar({**base, "visto_at": "2026-10-23T15:00:30+00:00"}, base))
 check("quieto pero pasaron dos minutos, sí", vale_guardar({**base, "visto_at": "2026-10-23T15:02:00+00:00"}, base))
 check("se movió, sí", vale_guardar({**base, "visto_at": "2026-10-23T15:00:10+00:00", "lat": -34.46}, base))
+
+# --- el latido ---
+ruta = os.path.join(tempfile.mkdtemp(), "latido.json")
+check("sin latido, no está vivo", latido_del_grabador(ruta, ahora) == {"vivo": False, "detalle": "sin latido"})
+with open(ruta, "w") as f:
+    json.dump({"vuelta": "2026-10-23T14:59:40+00:00", "ok": True, "trafico": 25, "nuestros_en_el_aire": 1}, f)
+check("una vuelta hace 20 s: vivo", latido_del_grabador(ruta, ahora)["vivo"])
+check("hace 5 minutos: no", not latido_del_grabador(ruta, datetime(2026, 10, 23, 15, 5, tzinfo=timezone.utc))["vivo"])
+with open(ruta, "w") as f:
+    f.write("{roto")
+check("un latido roto no tira", latido_del_grabador(ruta, ahora)["vivo"] is False)
 
 print(f"\n{sum(resultados)}/{len(resultados)}")
 sys.exit(0 if all(resultados) else 1)

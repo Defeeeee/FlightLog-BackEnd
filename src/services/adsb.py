@@ -102,3 +102,26 @@ def vale_guardar(nueva: dict, anterior: Optional[dict]) -> bool:
 
 def limite_de_retencion(ahora: datetime) -> str:
     return (ahora - timedelta(days=DIAS_DE_RETENCION)).astimezone(timezone.utc).isoformat()
+
+
+def latido_del_grabador(ruta: str, ahora: datetime) -> Dict:
+    """
+    Lo que `GET /health` dice del grabador: cuándo fue su última vuelta, si salió bien y si
+    está vivo (una vuelta en el último minuto). Nunca tira: si no hay latido, lo dice.
+    """
+    import json
+
+    try:
+        with open(ruta) as f:
+            d = json.load(f)
+        vuelta = datetime.fromisoformat(d["vuelta"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"vivo": False, "detalle": "sin latido"}
+    return {
+        "vivo": (ahora - vuelta).total_seconds() < 60,
+        "ultima_vuelta": d["vuelta"],
+        "ok": bool(d.get("ok")),
+        "trafico": d.get("trafico"),
+        "nuestros_en_el_aire": d.get("nuestros_en_el_aire"),
+        **({"error": d["error"]} if d.get("error") else {}),
+    }

@@ -18,6 +18,7 @@ recuperar, lo que no se vio no se vio.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -36,6 +37,9 @@ API = "https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}"
 CADA = 10
 RELEER_CADA = 600
 LIMPIAR_CADA = 3600
+#: El latido: cuándo fue la última vuelta y cómo salió. Lo muestra `GET /health`, para saber
+#: que el grabador sigue vivo sin entrar al VPS (`latido_del_grabador` en `services/adsb.py`).
+LATIDO = os.getenv("ADSB_LATIDO", "/tmp/grabador-adsb.json")
 UA = "Vector (vector.fdiaznem.com.ar; bitacora de vuelo; contacto fdiaznemeth@gmail.com)"
 
 
@@ -64,6 +68,7 @@ def main() -> None:
 
     while True:
         inicio = time.monotonic()
+        latido = {"vuelta": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ok": False}
         try:
             if inicio - releido > RELEER_CADA:
                 matriculas, hex_conocidos = releer(cliente)
@@ -92,9 +97,16 @@ def main() -> None:
                     ultimas[h] = p
             if filas:
                 cliente.table("adsb_posiciones").insert(filas).execute()
+            latido.update(ok=True, trafico=len(trafico), nuestros_en_el_aire=len(filas), matriculas=len(matriculas))
         except Exception as e:  # una vuelta fallida no tira abajo el grabador
             log.warning("vuelta fallida: %r", e)
+            latido["error"] = type(e).__name__
             time.sleep(20)
+        try:
+            with open(LATIDO, "w") as f:
+                json.dump(latido, f)
+        except OSError:
+            pass
         time.sleep(max(0.0, CADA - (time.monotonic() - inicio)))
 
 

@@ -1611,3 +1611,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Verificación:**
 - `test_adsb.py` 16/16 y `ruff`.
 - Una prueba en vivo con la API: el LVRCZ (agregado sólo para la prueba) salió encontrado, con posición, altura y velocidad.
+
+### 2026-10-23 17:09 UTC — Claude Code / Opus 5.5 — El latido del grabador ADS-B en /health
+
+**Qué cambié:**
+- `grabador_adsb.py`: en cada vuelta escribe `/tmp/grabador-adsb.json` (`ADSB_LATIDO`) con la hora, si salió bien, cuánto tráfico vio y cuántos aviones nuestros había en el aire.
+- `src/services/adsb.py`: `latido_del_grabador`, que nunca tira.
+- `src/controllers/health.py`: `grabador_adsb` en la respuesta. Es informativo y no cambia el código de estado, porque el deploy mira este endpoint y el grabador es otro proceso.
+- `test_adsb.py`: 4 casos más (20).
+
+**Por qué:** a los 40 minutos del deploy no entraban posiciones, y no había forma de saber si el grabador estaba caído o si simplemente no volaba ningún avión de un Hangar. Desde esta Mac el VPS no responde por SSH (Tailscale), y Federico vuela el LV-S114 mañana. Se descartó una tabla de latidos: una migración más para algo que un archivo resuelve.
+
+**Estado:** terminado.
+
+**Verificación:** `test_adsb.py` 20/20, `ruff` e `import`. En producción, ver la entrada siguiente o `GET /health`.
