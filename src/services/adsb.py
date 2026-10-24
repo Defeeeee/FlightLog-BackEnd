@@ -133,3 +133,139 @@ def latido_del_grabador(ruta: str, ahora: datetime) -> Dict:
         "vueltas_fallidas": d.get("vueltas_fallidas"),
         **({"ultimo_error": d["ultimo_error"]} if d.get("ultimo_error") else {}),
     }
+
+
+# --- Etapa 2: los vuelos dentro de las posiciones (2026-10-24) ---------------------------
+
+#: Más de 5 minutos sin posiciones separa dos vuelos: en tierra, a nivel del piso, no llega la
+#: señal a ningún receptor (medido el 2026-10-24: adentro de un vuelo, el corte más largo fue
+#: de 2 min 37 s, y entre vuelos del mismo avión pasó al menos media hora).
+HUECO_ENTRE_VUELOS = 300
+#: Por debajo de esto, cerca del final de un vuelo o entre dos subidas, es un aterrizaje (o un
+#: tocar y despegar). Los livianos nunca informan "en tierra": su transpondedor no lo sabe.
+PIES_DE_ATERRIZAJE = 250
+#: Cuánto antes del despegue y después del aterrizaje cargados se busca el tramo.
+MARGEN_DEL_VUELO = timedelta(minutes=15)
+
+
+def _t(p: dict) -> datetime:
+    v = p["visto_at"]
+    return v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+
+
+def tramos(posiciones: Iterable[dict]) -> List[List[dict]]:
+    """Las posiciones partidas en vuelos: un corte de más de 5 minutos es otro vuelo."""
+    ordenadas = sorted(posiciones, key=_t)
+    salida: List[List[dict]] = []
+    for p in ordenadas:
+        if salida and (_t(p) - _t(salida[-1][-1])).total_seconds() <= HUECO_ENTRE_VUELOS:
+            salida[-1].append(p)
+        else:
+            salida.append([p])
+    # Un tramo de una o dos posiciones es un avión que pasó lejos, no un vuelo para mostrar.
+    return [t for t in salida if len(t) >= 3]
+
+
+def aterrizajes(tramo: List[dict]) -> int:
+    """
+    Cuántas veces bajó por debajo de 250 pies viniendo de más arriba: el aterrizaje final y
+    cada tocar y despegar. Un motor y al aire bajo también cuenta: por eso se presenta como
+    estimado. Las primeras posiciones, recién despegado, no cuentan.
+    """
+    n, arriba = 0, False
+    for p in tramo:
+        alt = p.get("altitud")
+        if alt is None:
+            continue
+        if alt > PIES_DE_ATERRIZAJE:
+            arriba = True
+        elif arriba:
+            n += 1
+            arriba = False
+    return max(n, 1)
+
+
+def _millas(tramo: List[dict]) -> float:
+    import math
+
+    total = 0.0
+    for a, b in zip(tramo, tramo[1:]):
+        la1, lo1, la2, lo2 = map(math.radians, (a["lat"], a["lon"], b["lat"], b["lon"]))
+        h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+        total += 2 * 3440.065 * math.asin(math.sqrt(h))
+    return total
+
+
+def resumen(tramo: List[dict]) -> Dict:
+    """Lo que se muestra de un tramo. Las horas son de la primera y la última posición en el aire."""
+    alts = [p["altitud"] for p in tramo if p.get("altitud") is not None]
+    vels = [p["velocidad"] for p in tramo if p.get("velocidad") is not None]
+    return {
+        "despegue": _t(tramo[0]).astimezone(timezone.utc).isoformat(timespec="seconds"),
+        "aterrizaje": _t(tramo[-1]).astimezone(timezone.utc).isoformat(timespec="seconds"),
+        "minutos": round((_t(tramo[-1]) - _t(tramo[0])).total_seconds() / 60),
+        "aterrizajes": aterrizajes(tramo),
+        "altitud_max": max(alts) if alts else None,
+        "velocidad_max": round(max(vels)) if vels else None,
+        "millas": round(_millas(tramo), 1),
+        "posiciones": len(tramo),
+        "inicio": [round(tramo[0]["lat"], 5), round(tramo[0]["lon"], 5)],
+        "fin": [round(tramo[-1]["lat"], 5), round(tramo[-1]["lon"], 5)],
+    }
+
+
+def compactar(tramo: List[dict], fuente: str = "adsb.fi") -> Dict:
+    """El recorrido para guardar con el vuelo: segundos desde el primero, para que pese poco."""
+    t0 = _t(tramo[0])
+    return {
+        "t0": int(t0.timestamp()),
+        "fuente": fuente,
+        "p": [
+            [
+                int((_t(p) - t0).total_seconds()),
+                round(p["lat"], 5),
+                round(p["lon"], 5),
+                p.get("altitud"),
+                round(p["velocidad"]) if p.get("velocidad") is not None else None,
+            ]
+            for p in tramo
+        ],
+    }
+
+
+def tramo_del_vuelo(posiciones: Iterable[dict], despegue: datetime, aterrizaje: datetime) -> Optional[List[dict]]:
+    """
+    El tramo que corresponde al vuelo cargado: el que más se superpone con su despegue y su
+    aterrizaje. Nunca se devuelve otro tramo del mismo avión (el de otro piloto, en un avión
+    de escuela): si ninguno se superpone, no hay recorrido.
+    """
+    mejor, mejor_s = None, 0.0
+    for t in tramos(p for p in posiciones if despegue - MARGEN_DEL_VUELO <= _t(p) <= aterrizaje + MARGEN_DEL_VUELO):
+        ini, fin = _t(t[0]), _t(t[-1])
+        s = (min(fin, aterrizaje) - max(ini, despegue)).total_seconds()
+        if s > mejor_s:
+            mejor, mejor_s = t, s
+    return mejor
+
+
+#: Desde cuándo las posiciones son de adsb.fi; antes, de adsb.lol (ver `grabador_adsb.py`).
+DESDE_ADSB_FI = datetime(2026, 10, 23, 20, 47, tzinfo=timezone.utc)
+
+
+def fuente_de(tramo: List[dict]) -> str:
+    return "adsb.fi" if _t(tramo[0]) >= DESDE_ADSB_FI else "adsb.lol"
+
+
+def expandir(compacto: Dict) -> List[dict]:
+    """El recorrido guardado, otra vez como posiciones (para el resumen)."""
+    t0 = datetime.fromtimestamp(int(compacto["t0"]), timezone.utc)
+    return [
+        {"visto_at": t0 + timedelta(seconds=dt), "lat": la, "lon": lo, "altitud": alt, "velocidad": v}
+        for dt, la, lo, alt, v in compacto.get("p", [])
+    ]
+
+
+def ventana_del_dia(fecha: str) -> Tuple[datetime, datetime]:
+    """El día en hora argentina (UTC−3, sin horario de verano) como intervalo UTC."""
+    d = datetime.fromisoformat(fecha).replace(tzinfo=timezone.utc) + timedelta(hours=3)
+    return d, d + timedelta(days=1)

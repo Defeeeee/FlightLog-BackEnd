@@ -1643,3 +1643,27 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** desplegado; falta ver en `/health` que las vueltas salgan.
 
 **Verificación:** `test_adsb.py` 21/21. Una vuelta real contra adsb.fi encontró el LVS114 en vuelo (`e200b9`, 1225 pies, 82 kt).
+
+### 2026-10-24 23:12 UTC — Claude Code / Opus 5.5 — Los recorridos ADS-B, etapa 2: el recorrido de cada vuelo (migración 035)
+
+**Qué cambié:**
+- `migrations/035_recorridos.sql` (**aplicada en producción**, OK de Federico): `vuelo_recorridos` (una fila por vuelo, sólo del service role, se borra con el vuelo).
+- `src/services/adsb.py`:
+  - `tramos` (más de 5 min sin posiciones es otro vuelo);
+  - `aterrizajes` (veces que bajó de 250 pies viniendo de más arriba);
+  - `resumen`, `compactar` y `expandir`;
+  - `tramo_del_vuelo` (el que más se superpone con el vuelo cargado, o ninguno), `fuente_de` y `ventana_del_dia`.
+- `src/controllers/adsb.py` (nuevo):
+  - `GET /adsb/vuelos/{flight_id}`: el guardado, o lo busca y lo guarda si el vuelo ya terminó;
+  - `GET /adsb/detectados?aircraft_id=&fecha=`: los vuelos de ese avión ese día argentino, sólo horarios.
+  - El vuelo y el avión se leen con el cliente del piloto (RLS); las posiciones y los recorridos, con el service role.
+- `src/app.py` lo registra; `test_adsb.py` llega a 35 casos.
+
+**Por qué:** ver la bitácora del frontend (2.30.0).
+- **Tabla aparte y no una columna de `flights`:** hay siete lecturas de `flights` con todas las columnas, algunas sin modelo (inicio, auditoría, copiloto), y unos KB por vuelo viajarían en todas.
+- **Nunca se devuelve un tramo que no se superponga con el vuelo cargado:** los aviones de escuela los vuelan varios pilotos.
+- Contra el vuelo real del LV-S114 del 24/10, `resumen` da 49 min, 1 aterrizaje, 64,8 nm y 281 posiciones, lo mismo que a mano.
+
+**Estado:** terminado: la 035 está aplicada y el backend se despliega antes que el frontend.
+
+**Verificación:** `test_adsb.py` 35/35, `ruff` e `import src.app`. Los endpoints se probaron del lado del frontend contra el backend falso; contra la base real, recién después de la migración.
