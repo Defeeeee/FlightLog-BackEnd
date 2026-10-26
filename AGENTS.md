@@ -1667,3 +1667,24 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado: la 035 está aplicada y el backend se despliega antes que el frontend.
 
 **Verificación:** `test_adsb.py` 35/35, `ruff` e `import src.app`. Los endpoints se probaron del lado del frontend contra el backend falso; contra la base real, recién después de la migración.
+
+### 2026-10-26 11:20 UTC — Claude Code / Opus 5.5 — ADS-B en navegaciones: sin radio y sin partir el vuelo por falta de señal
+
+**Qué cambié:**
+- `grabador_adsb.py`: además del radio de 250 millas alrededor de Buenos Aires (que sirve para descubrir aviones), pide en cada vuelta **los aviones ya conocidos por su código** (`/api/v2/hex/…` de adsb.fi, todos en un pedido), estén donde estén.
+- `src/services/adsb.py`:
+  - `tramos`: un corte de más de 5 min parte el vuelo sólo si la última posición antes del corte estaba a 600 pies o menos (aterrizando) o si el corte pasa los 45 min. En altura es falta de señal.
+  - `tramo_del_vuelo` junta **todos** los tramos que se superponen con el vuelo cargado, no sólo el más largo.
+  - `resumen` informa `minutos_sin_senal`: los cortes de más de 2 minutos, sumados.
+- `test_adsb.py`: 40 casos.
+
+**Por qué:**
+- Federico: el alumno que se va de navegación se aleja de Buenos Aires, la tarjeta se corta y la vuelta no aparece hasta que está cerca. Había dos causas.
+- **El radio fijo de la consulta:** Córdoba queda afuera de las 250 millas. Pedir por código no tiene radio.
+- **El corte de 5 minutos partía el vuelo:** lejos de las antenas, volando bajo, se pierde la señal; la tarjeta mostraba sólo el pedazo más largo y la vuelta se perdía.
+- Lo que no se arregla por software es la cobertura: donde ninguna antena escucha, no hay datos. Se dibuja punteado y se dice cuántos minutos faltan.
+- **El costo:** una navegación con escala y menos de 45 min en tierra fuera de cobertura aparece como un solo vuelo detectado. Para el recorrido del vuelo cargado no cambia nada, porque se cortan por los horarios del piloto.
+
+**Estado:** terminado.
+
+**Verificación:** `test_adsb.py` 40/40, con una navegación de prueba: 20 min sin señal en altura, aterrizaje, corte de 50 min, y la vuelta entra entera. El pedido por código contra adsb.fi responde bien; ninguno de esos aviones estaba volando a esa hora.

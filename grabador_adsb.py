@@ -8,7 +8,9 @@ Corre en el VPS como su propio proceso de PM2 (`grabador-adsb`), al lado del bac
 deploy lo reinicia (`.github/workflows/deploy.yml`).
 
 - Cada 10 s pide a adsb.fi (y si falla, a adsb.lol) el tráfico alrededor de cada punto de `ADSB_PUNTOS` (por defecto,
-  Buenos Aires con 250 millas): un pedido por punto, no uno por avión.
+  Buenos Aires con 250 millas), para descubrir aviones del Hangar; y los ya conocidos, por su
+  código, en un solo pedido: así una navegación lejos de Buenos Aires se sigue grabando
+  mientras alguna antena la escuche.
 - Cada 10 min relee las matrículas de los Hangares y los códigos ya aprendidos.
 - Una vez por hora borra lo que tiene más de 30 días.
 
@@ -37,6 +39,8 @@ log = logging.getLogger("grabador-adsb")
 #: le contestaba 429 a la IP del VPS casi siempre, aun a un pedido cada 20 s. adsb.fi es
 #: "para uso personal y no comercial", con cita y link: si Vector cobra, hay que escribirles
 #: o tener un receptor propio. Las dos responden con el formato de la v2 de ADSBexchange.
+#: Los aviones ya conocidos, por su código, sin importar dónde estén (adsb.fi).
+POR_HEX = "https://opendata.adsb.fi/api/v2/hex/{lista}"
 FUENTES = [
     ("adsb.fi", "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{radio}"),
     ("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{radio}"),
@@ -100,6 +104,13 @@ def main() -> None:
                     break
                 for a in r.json().get("ac") or []:
                     trafico[str(a.get("hex"))] = a
+            # Y los ya conocidos, por su código, estén donde estén: el radio de arriba no llega
+            # a una navegación a Córdoba. Un pedido para todos (adsb.fi acepta la lista).
+            if hex_conocidos:
+                r = http.get(POR_HEX.format(lista=",".join(sorted(hex_conocidos))[:3000]))
+                if r.status_code == 200:
+                    for a in r.json().get("ac") or []:
+                        trafico[str(a.get("hex"))] = a
             ahora = datetime.now(timezone.utc)
 
             filas = []

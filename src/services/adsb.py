@@ -153,12 +153,32 @@ def _t(p: dict) -> datetime:
     return v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
 
 
+#: Un corte con el avión en altura no es un aterrizaje: lejos de las antenas, en una
+#: navegación, se pierde la señal y vuelve. Parte el vuelo sólo si la última posición antes del
+#: corte era baja (estaba aterrizando) o si el corte es tan largo que ya no se sabe.
+PIES_ANTES_DEL_CORTE = 600
+HUECO_SIEMPRE_CORTA = 45 * 60
+
+
+def _corta(anterior: dict, siguiente: dict) -> bool:
+    hueco = (_t(siguiente) - _t(anterior)).total_seconds()
+    if hueco <= HUECO_ENTRE_VUELOS:
+        return False
+    if hueco > HUECO_SIEMPRE_CORTA:
+        return True
+    alt = anterior.get("altitud")
+    return alt is None or alt <= PIES_ANTES_DEL_CORTE
+
+
 def tramos(posiciones: Iterable[dict]) -> List[List[dict]]:
-    """Las posiciones partidas en vuelos: un corte de más de 5 minutos es otro vuelo."""
+    """
+    Las posiciones partidas en vuelos. Un corte de más de 5 minutos es otro vuelo si el avión
+    venía bajo; en altura es falta de señal, y el vuelo sigue (hasta 45 minutos).
+    """
     ordenadas = sorted(posiciones, key=_t)
     salida: List[List[dict]] = []
     for p in ordenadas:
-        if salida and (_t(p) - _t(salida[-1][-1])).total_seconds() <= HUECO_ENTRE_VUELOS:
+        if salida and not _corta(salida[-1][-1], p):
             salida[-1].append(p)
         else:
             salida.append([p])
@@ -208,6 +228,8 @@ def resumen(tramo: List[dict]) -> Dict:
         "altitud_max": max(alts) if alts else None,
         "velocidad_max": round(max(vels)) if vels else None,
         "millas": round(_millas(tramo), 1),
+        # Los cortes de señal de más de 2 minutos, sumados: lejos de las antenas no hay recepción.
+        "minutos_sin_senal": round(sum(max(0.0, (_t(b) - _t(a)).total_seconds() - 120) for a, b in zip(tramo, tramo[1:]) if (_t(b) - _t(a)).total_seconds() > 120) / 60),
         "posiciones": len(tramo),
         "inicio": [round(tramo[0]["lat"], 5), round(tramo[0]["lon"], 5)],
         "fin": [round(tramo[-1]["lat"], 5), round(tramo[-1]["lon"], 5)],
@@ -235,17 +257,16 @@ def compactar(tramo: List[dict], fuente: str = "adsb.fi") -> Dict:
 
 def tramo_del_vuelo(posiciones: Iterable[dict], despegue: datetime, aterrizaje: datetime) -> Optional[List[dict]]:
     """
-    El tramo que corresponde al vuelo cargado: el que más se superpone con su despegue y su
-    aterrizaje. Nunca se devuelve otro tramo del mismo avión (el de otro piloto, en un avión
-    de escuela): si ninguno se superpone, no hay recorrido.
+    El recorrido del vuelo cargado: **todos** los tramos que se superponen con su despegue y su
+    aterrizaje, juntos. Una navegación puede quedar partida por un corte largo de señal y la
+    vuelta tiene que estar. Nunca entra un tramo que no se superpone (el vuelo de otro piloto en
+    el mismo avión de escuela, antes o después): si ninguno se superpone, no hay recorrido.
     """
-    mejor, mejor_s = None, 0.0
+    juntos: List[dict] = []
     for t in tramos(p for p in posiciones if despegue - MARGEN_DEL_VUELO <= _t(p) <= aterrizaje + MARGEN_DEL_VUELO):
-        ini, fin = _t(t[0]), _t(t[-1])
-        s = (min(fin, aterrizaje) - max(ini, despegue)).total_seconds()
-        if s > mejor_s:
-            mejor, mejor_s = t, s
-    return mejor
+        if (min(_t(t[-1]), aterrizaje) - max(_t(t[0]), despegue)).total_seconds() > 0:
+            juntos.extend(t)
+    return juntos or None
 
 
 #: Desde cuándo las posiciones son de adsb.fi; antes, de adsb.lol (ver `grabador_adsb.py`).
