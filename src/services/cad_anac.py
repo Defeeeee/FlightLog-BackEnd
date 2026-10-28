@@ -175,7 +175,14 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
     algo no tiene la forma esperada.
     """
     cliente = httpx.AsyncClient(
-        timeout=30, follow_redirects=False, headers={"User-Agent": _UA, "Accept-Language": "es-AR,es;q=0.9"}, transport=transporte
+        # 10 s para conectar: si ANAC no acepta la conexión, se avisa enseguida en vez de
+        # esperar lo que el frontend ya no espera.
+        timeout=httpx.Timeout(25, connect=10),
+        follow_redirects=False,
+        headers={"User-Agent": _UA, "Accept-Language": "es-AR,es;q=0.9"},
+        transport=transporte,
+        # El TLS va de punta a punta: el proxy sólo ve a qué host se conecta.
+        proxy=None if transporte is not None else (settings.cad_proxy or None),
     )
     try:
         params = {
@@ -217,6 +224,9 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
         if r.status_code != 200 or "dataSource" not in r.text:
             raise AnacNoContesta(f"El CAD no abrió la sesión ({r.status_code}).")
         return cliente
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        await cliente.aclose()
+        raise AnacNoContesta("ANAC no está aceptando conexiones del servidor de Vector. No se guardó nada: probá en un rato o usá el marcador.") from exc
     except httpx.HTTPError as exc:
         await cliente.aclose()
         raise AnacNoContesta("ANAC no contesta. Probá en un rato.") from exc

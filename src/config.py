@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # contraseña de ANAC que guarda el piloto. Sin ella el modo queda apagado —falla cerrado,
     # como `documents_alert_secret`— y sigue andando el marcador.
     cad_clave_cifrado: Optional[str] = Field(default=None, validation_alias="CAD_CLAVE_CIFRADO")
+    # Por dónde salir hacia ANAC: un proxy CONNECT con IP argentina, por Tailscale
+    # (`http://100.87.63.118:8899`, en defeserver-amenaba). ANAC dejó de aceptar conexiones del
+    # VPS el 2026-10-28. Sin configurar, se sale directo.
+    cad_proxy: Optional[str] = Field(default=None, validation_alias="CAD_PROXY")
 
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")

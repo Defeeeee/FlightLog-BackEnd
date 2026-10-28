@@ -1707,3 +1707,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** desplegado con este commit. **No se probó contra ANAC con una cuenta real** (no se escriben contraseñas ajenas): el flujo se armó leyendo el JS del portal y el formulario real, y el test usa un ANAC falso con las mismas redirecciones. La primera conexión real la hace Federico; si falla, el mensaje dice en qué paso.
 
 **Verificación:** `test_cad_anac.py` 22/22, `ruff`, `import src.app`. La migración se verificó: RLS prendido y sin permisos para `anon` ni `authenticated`.
+
+### 2026-10-28 15:26 UTC — Claude Code / Opus 5.5 — ANAC por un proxy en defeserver-amenaba
+
+**Qué cambié:**
+- `src/services/cad_anac.py`: sale a ANAC por `CAD_PROXY` si está, con 10 s para conectar (antes 30 s), y un mensaje propio cuando ANAC no acepta la conexión. `src/config.py`: `cad_proxy`.
+- En `defeserver-amenaba` (AlmaLinux, Tailscale 100.87.63.118), con OK explícito de Federico: `~/proxy-anac/proxy-anac.py` y el servicio `proxy-anac` de systemd. Es un proxy CONNECT de Python sin dependencias que escucha sólo en la IP de Tailscale (puerto 8899), acepta sólo al VPS (100.78.13.108) y sólo deja pasar `login.anac.gob.ar:443` y `cad.anac.gob.ar:443`.
+- En el `.env` del VPS: `CAD_PROXY=http://100.87.63.118:8899`.
+
+**Por qué:** la primera conexión real de Federico dio `ConnectTimeout`. Desde las 15 UTC el VPS no llega a ningún host de ANAC (login, CAD ni www: la conexión no se abre), y a las 14:30 entraba. `argentina.gob.ar` sí contesta, y desde el navegador de Federico el CAD responde en 131 ms. Es un bloqueo de ANAC a la IP del VPS (Oracle, São Paulo): o por las pruebas del día, o a IPs de afuera. Amenaba tiene IP argentina y llega en 13 ms. El TLS va de punta a punta, así que el proxy no ve usuarios ni contraseñas.
+- Se descartó usar amenaba como exit node del VPS: mandaría todo el tráfico del VPS por la casa de Federico.
+- **Si amenaba se apaga, el modo "desde Vector" no anda**: el mensaje lo dice y queda el marcador. Si ANAC desbloquea el VPS, alcanza con borrar `CAD_PROXY`.
+
+**Estado:** desplegado con este commit.
+**Verificación:** desde el VPS, por el proxy, login y CAD contestan 200 (0,2 s) y google.com se rechaza. `test_cad_anac.py` 22/22.
