@@ -29,9 +29,12 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
+import os
 import re
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -45,7 +48,47 @@ CAD = "https://cad.anac.gob.ar"
 REDIRECCION = f"{CAD}/portalApp/"
 API = f"{CAD}/foliadoweb/api/VueloTripulante/"
 COOKIE_DEL_CAD = f"{CAD}/PortalAplicaciones/api/CAD/cookiePorUsuario"
-_UA = "Mozilla/5.0 (Vector; +https://vector.fdiaznem.com.ar)"
+
+# ------------------------------------------------- como el navegador del CAD ---
+#
+# Los encabezados son los de Chrome usando el CAD: navegación para las páginas del login,
+# `fetch` del mismo sitio para la API (lo que hace la app del CAD, y el marcador desde su
+# pestaña). Un User-Agent con "Vector" se distinguía de cualquier piloto.
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+_CHROME = {
+    "User-Agent": _UA,
+    "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
+    "sec-ch-ua": '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+}
+_PAGINA = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+}
+_APP_CAD = f"{CAD}/foliadoweb/"
+
+
+def _api(referer: str = _APP_CAD, **extra: str) -> Dict[str, str]:
+    """Un `fetch` de la app del CAD a su propia API."""
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": referer,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        **extra,
+    }
+
+
+def _navegar(sitio: str, referer: Optional[str] = None, **extra: str) -> Dict[str, str]:
+    h = {**_PAGINA, "Sec-Fetch-Site": sitio, **extra}
+    if referer:
+        h["Referer"] = referer
+    return h
 
 #: Lo único que se lee del CAD. Nada de la DDJJ.
 RUTAS_GET = {
@@ -60,13 +103,13 @@ RUTAS_GET = {
 
 #: Las listas son públicas e iguales para todos: se guardan un rato.
 _LISTAS_PUBLICAS = {"GetFinalidadListItem", "GetAutoridadesListItem", "GetLugarAterrizajeListItem", "GetSimuladoresListItem", "GetModelosPorSimuladorListItem"}
-_TTL_LISTAS = 24 * 3600
+_TTL_LISTAS = 7 * 24 * 3600
 #: Cuánto se reusa una sesión abierta, como mucho. Antes vence la del CAD, y entonces `pedir`
 #: entra de nuevo: cada login es lo que más se nota del lado de ANAC.
 _TTL_SESION = 8 * 3600
 #: La lista de vuelos de un piloto se reusa un rato: abrir "Pasar al CAD" varias veces no
 #: vuelve a pedírsela a ANAC. "Crear" la borra.
-_TTL_VUELOS = 10 * 60
+_TTL_VUELOS = 30 * 60
 
 # ------------------------------------------------------- cuidar a ANAC ---
 #
@@ -204,7 +247,8 @@ async def _seguir(cliente: httpx.AsyncClient, respuesta: httpx.Response, saltos:
         token = token_de_la_redireccion(destino)
         if token or destino.startswith(REDIRECCION):
             return respuesta, token
-        respuesta = await cliente.get(destino)
+        sitio = "same-origin" if urlparse(destino).netloc == respuesta.url.host else "same-site"
+        respuesta = await cliente.get(destino, headers=_navegar(sitio, str(respuesta.request.headers.get("Referer") or "") or None))
     raise AnacNoContesta("El login de ANAC dio demasiadas vueltas.")
 
 
@@ -217,16 +261,7 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
     if transporte is None:
         _revisar_pausa()
         _anotar_login()
-    cliente = httpx.AsyncClient(
-        # 10 s para conectar: si ANAC no acepta la conexión, se avisa enseguida en vez de
-        # esperar lo que el frontend ya no espera.
-        timeout=httpx.Timeout(25, connect=10),
-        follow_redirects=False,
-        headers={"User-Agent": _UA, "Accept-Language": "es-AR,es;q=0.9"},
-        transport=transporte,
-        # El TLS va de punta a punta: el proxy sólo ve a qué host se conecta.
-        proxy=None if transporte is not None else (settings.cad_proxy or None),
-    )
+    cliente = _cliente(transporte)
     try:
         params = {
             "client_id": "portalAplicaciones",
@@ -236,12 +271,15 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
             "state": secrets.token_urlsafe(16),
             "nonce": secrets.token_urlsafe(16),
         }
-        r, _ = await _seguir(cliente, await cliente.get(f"{LOGIN}/connect/authorize", params=params))
+        # Como quien toca "Ingresar" en el portal del CAD.
+        r, _ = await _seguir(cliente, await cliente.get(f"{LOGIN}/connect/authorize", params=params, headers=_navegar("same-site", REDIRECCION)))
         form = leer_formulario(r.text) if r.status_code == 200 else None
         if not form:
             raise AnacNoContesta("No encontramos el formulario de login de ANAC.")
+        pagina_login = str(r.url)
         r = await cliente.post(
-            str(r.url),
+            pagina_login,
+            headers=_navegar("same-origin", pagina_login, Origin=LOGIN, **{"Cache-Control": "max-age=0"}),
             data={
                 "ReturnUrl": form["return_url"],
                 "Time": str(int(time.time() * 1000)),
@@ -259,13 +297,11 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
         r, token = await _seguir(cliente, r)
         if not token:
             raise AnacNoContesta("ANAC no devolvió la sesión del CAD.")
-        r = await cliente.get(COOKIE_DEL_CAD, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+        r = await cliente.get(COOKIE_DEL_CAD, headers=_api(REDIRECCION, Authorization=f"Bearer {token}"))
         if r.status_code >= 400:
             raise AnacNoContesta(f"El CAD no abrió la sesión ({r.status_code}).")
-        # La prueba: una página de vuelos.
-        r = await cliente.get(API + "GetPagedList", params=_PAGINA_DE_VUELOS | {"rowsPerPage": "1"}, headers={"Accept": "application/json"})
-        if r.status_code != 200 or "dataSource" not in r.text:
-            raise AnacNoContesta(f"El CAD no abrió la sesión ({r.status_code}).")
+        # Sin pedido de prueba: el primero de verdad dice si la sesión anda (y `pedir` entra de
+        # nuevo una vez si no). Es un pedido menos por login.
         return cliente
     except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ProxyError) as exc:
         await cliente.aclose()
@@ -293,9 +329,106 @@ _PAGINA_DE_VUELOS = {
 
 # ---------------------------------------------------------- las sesiones ---
 
+def _cliente(transporte: Optional[httpx.AsyncBaseTransport] = None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        # 10 s para conectar: si ANAC no acepta la conexión, se avisa enseguida en vez de
+        # esperar lo que el frontend ya no espera.
+        timeout=httpx.Timeout(25, connect=10),
+        follow_redirects=False,
+        headers=_CHROME,
+        transport=transporte,
+        # El TLS va de punta a punta: el proxy sólo ve a qué host se conecta.
+        proxy=None if transporte is not None else (settings.cad_proxy or None),
+    )
+
+
+# Las sesiones y las listas se guardan también en disco, para que un deploy (que reinicia el
+# backend) no obligue a entrar de nuevo a ANAC. Las cookies van cifradas con la misma clave
+# que las contraseñas. `CAD_CACHE_DIR` lo cambia (vacío: sólo en memoria).
+_DIR = os.environ.get("CAD_CACHE_DIR", str(Path.home() / ".cache" / "vector-cad"))
+
 _sesiones: Dict[str, Tuple[httpx.AsyncClient, float]] = {}
 _candados: Dict[str, asyncio.Lock] = {}
 _listas: Dict[str, Tuple[Any, float]] = {}
+_detalles: Dict[str, Any] = {}
+
+
+def _archivo(nombre: str) -> Optional[Path]:
+    if not _DIR:
+        return None
+    d = Path(_DIR)
+    try:
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        return None
+    return d / nombre
+
+
+def _leer_disco(nombre: str) -> Dict[str, Any]:
+    f = _archivo(nombre)
+    try:
+        return json.loads(f.read_text()) if f and f.exists() else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _escribir_disco(nombre: str, datos: Dict[str, Any]) -> None:
+    f = _archivo(nombre)
+    if not f:
+        return
+    try:
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(datos))
+        os.chmod(tmp, 0o600)
+        tmp.replace(f)
+    except OSError:
+        pass
+
+
+def _cookies_de(cliente: httpx.AsyncClient) -> list:
+    return [{"n": c.name, "v": c.value, "d": c.domain, "p": c.path} for c in cliente.cookies.jar]
+
+
+def _persistir_sesion(user_id: str, cliente: Optional[httpx.AsyncClient], desde: float = 0.0) -> None:
+    if not disponible():
+        return
+    todas = _leer_disco("sesiones.json")
+    if cliente is None:
+        todas.pop(user_id, None)
+    else:
+        todas[user_id] = {"t": desde, "c": cifrar(json.dumps(_cookies_de(cliente)))}
+    _escribir_disco("sesiones.json", todas)
+
+
+def _sesion_del_disco(user_id: str) -> Optional[Tuple[httpx.AsyncClient, float]]:
+    """La sesión guardada antes de un reinicio, si no venció. `t` es hora de reloj."""
+    guardada = _leer_disco("sesiones.json").get(user_id)
+    if not guardada or time.time() - float(guardada.get("t") or 0) >= _TTL_SESION:
+        return None
+    try:
+        cookies = json.loads(descifrar(guardada["c"]))
+    except (CadError, ValueError, KeyError):
+        return None
+    cliente = _cliente()
+    for c in cookies:
+        cliente.cookies.set(c["n"], c["v"], domain=c["d"], path=c["p"])
+    # En `_sesiones` el tiempo es monotónico: se traduce lo que ya pasó.
+    return cliente, time.monotonic() - (time.time() - float(guardada["t"]))
+
+
+def _cargar_listas() -> None:
+    ahora_m, ahora = time.monotonic(), time.time()
+    for clave, (datos, t) in _leer_disco("listas.json").items():
+        if ahora - t < _TTL_LISTAS:
+            _listas[clave] = (datos, ahora_m - (ahora - t))
+
+
+def _guardar_listas() -> None:
+    ahora_m, ahora = time.monotonic(), time.time()
+    _escribir_disco("listas.json", {k: (d, ahora - (ahora_m - t)) for k, (d, t) in _listas.items()})
+
+
+_cargar_listas()
 
 
 def _candado(user_id: str) -> asyncio.Lock:
@@ -306,11 +439,13 @@ async def olvidar_sesion(user_id: str) -> None:
     viejo = _sesiones.pop(user_id, None)
     if viejo:
         await viejo[0].aclose()
+    _persistir_sesion(user_id, None)
 
 
 async def guardar_sesion(user_id: str, cliente: httpx.AsyncClient) -> None:
     await olvidar_sesion(user_id)
     _sesiones[user_id] = (cliente, time.monotonic())
+    _persistir_sesion(user_id, cliente, time.time())
 
 
 async def sesion(user_id: str, credenciales) -> httpx.AsyncClient:
@@ -319,8 +454,9 @@ async def sesion(user_id: str, credenciales) -> httpx.AsyncClient:
     (usuario, clave) o lanza `CadError`: se llama sólo si hace falta entrar.
     """
     async with _candado(user_id):
-        abierta = _sesiones.get(user_id)
+        abierta = _sesiones.get(user_id) or _sesion_del_disco(user_id)
         if abierta and time.monotonic() - abierta[1] < _TTL_SESION:
+            _sesiones[user_id] = abierta
             return abierta[0]
         usuario, clave = await credenciales()
         cliente = await iniciar_sesion(usuario, clave)
@@ -337,11 +473,15 @@ async def pedir(user_id: str, credenciales, ruta: str, params: Optional[Dict[str
         guardada = _listas.get(clave_lista)
         if guardada and time.monotonic() - guardada[1] < _TTL_LISTAS:
             return guardada[0]
+    # El detalle de un vuelo ("Traer a Vector" lee uno por vuelo) no cambia: se lee una vez.
+    clave_detalle = f"{user_id}:{clave_lista}"
+    if ruta == "Get" and clave_detalle in _detalles:
+        return _detalles[clave_detalle]
     _revisar_pausa()
     for intento in range(2):
         cliente = await sesion(user_id, credenciales)
         try:
-            r = await cliente.get(API + ruta, params=params or {}, headers={"Accept": "application/json"})
+            r = await cliente.get(API + ruta, params=params or {}, headers=_api())
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ProxyError) as exc:
             _pausar()
             raise AnacNoContesta("El CAD no contesta. Probá en un rato.") from exc
@@ -362,6 +502,11 @@ async def pedir(user_id: str, credenciales, ruta: str, params: Optional[Dict[str
             raise AnacNoContesta("El CAD no devolvió datos.") from exc
         if ruta in _LISTAS_PUBLICAS:
             _listas[clave_lista] = (datos, time.monotonic())
+            _guardar_listas()
+        if ruta == "Get":
+            if len(_detalles) > 5000:
+                _detalles.clear()
+            _detalles[clave_detalle] = datos
         return datos
     raise AnacNoContesta("El CAD cerró la sesión.")
 
@@ -433,7 +578,7 @@ async def crear_vuelo(user_id: str, credenciales, datos: Dict[str, Any]) -> Dict
     for intento in range(2):
         cliente = await sesion(user_id, credenciales)
         try:
-            r = await cliente.post(API + "Create", json=vuelo, headers={"Accept": "application/json"})
+            r = await cliente.post(API + "Create", json=vuelo, headers=_api(**{"Origin": CAD, "Content-Type": "application/json"}))
         except httpx.HTTPError as exc:
             raise AnacNoContesta("El CAD no contestó: fijate en el CAD si el vuelo quedó antes de mandarlo de nuevo.") from exc
         if r.status_code in (401, 403) and intento == 0:

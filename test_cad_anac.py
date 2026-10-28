@@ -7,11 +7,15 @@ si algo falla.
 """
 
 import asyncio
+import os
 import sys
+import tempfile
 from urllib.parse import parse_qs
 
 import httpx
 from cryptography.fernet import Fernet
+
+os.environ["CAD_CACHE_DIR"] = tempfile.mkdtemp()
 
 from src.config import settings
 from src.services import cad_anac
@@ -220,6 +224,28 @@ async def _probar_bloqueo():
 
 asyncio.run(_probar_bloqueo())
 check("con transporte de prueba no queda en pausa", cad_anac._pausa_hasta == 0.0)
+
+# --- como el navegador del CAD, y la sesión que sobrevive a un reinicio ---
+check("el User-Agent no dice Vector", "vector" not in cad_anac._UA.lower())
+pedidos = []
+
+
+async def _sesion_guardada():
+    cliente = await cad_anac.iniciar_sesion("piloto", "buena", transporte=anac_falso("buena", pedidos))
+    check("el login no hace un pedido de prueba a la API", not any("VueloTripulante" in p[2] for p in pedidos))
+    await cad_anac.guardar_sesion("u1", cliente)
+    cad_anac._sesiones.clear()  # el reinicio
+    vuelta = cad_anac._sesion_del_disco("u1")
+    check("la sesión vuelve del disco con su cookie", vuelta is not None and vuelta[0].cookies.get("CAD") == "sesion")
+    texto = open(os.path.join(os.environ["CAD_CACHE_DIR"], "sesiones.json")).read()
+    check("la cookie en disco va cifrada", "sesion" not in texto)
+    await cad_anac.olvidar_sesion("u1")
+    check("olvidar la borra del disco", cad_anac._sesion_del_disco("u1") is None)
+    await vuelta[0].aclose()
+    await cliente.aclose()
+
+
+asyncio.run(_sesion_guardada())
 
 print(f"\n{sum(resultados)}/{len(resultados)}")
 sys.exit(0 if all(resultados) else 1)

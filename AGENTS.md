@@ -1754,3 +1754,18 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado; el bloqueo de ANAC sigue.
 
 **Verificación:** 33/33 offline. Contra ANAC no: no contesta.
+
+### 2026-10-28 22:42 UTC — Claude Code / Opus 5.5 — ANAC: los pedidos de un navegador del CAD, y los menos posibles
+
+**Qué cambié (`src/services/cad_anac.py`):**
+- Encabezados de Chrome usando el CAD (`_CHROME`, `_navegar` para las páginas del login con su Referer y Origin, `_api` para la API como `fetch` del mismo sitio). Antes el User-Agent decía "Vector".
+- El login ya no hace el `GetPagedList` de prueba: un pedido menos por login. El primer pedido real lo prueba, y `pedir` entra de nuevo una vez si la sesión no anda.
+- Las sesiones (cookies cifradas con `CAD_CLAVE_CIFRADO`) y las listas públicas se guardan en `~/.cache/vector-cad/` (`CAD_CACHE_DIR`): un deploy reinicia el backend y antes obligaba a entrar de nuevo.
+- Listas 7 días, lista de vuelos 30 min, y el detalle de un vuelo (`Get?id=`, "Traer a Vector") se lee una sola vez.
+- `test_cad_anac.py`: 38 checks (sin "Vector" en el UA, sin pedido de prueba, la sesión vuelve del disco cifrada, olvidar la borra).
+
+**Por qué:** Federico pidió reducir al mínimo los pedidos y que para ANAC parezcan un cliente del CAD, después de que ANAC bloqueara el VPS y la salida por amenaba. Con todo esto, un piloto conectado le cuesta a ANAC un login cada 8 h como mucho (5 pedidos) y, por día, la sincronización (1) más lo que abra. No es una huella de navegador completa: el TLS y HTTP/1.1 de httpx siguen siendo distintos de Chrome, y no se piden los archivos de las páginas. Se descartó rotar IPs o una VPN: es esquivar el bloqueo y arriesga las cuentas de los pilotos.
+
+**Estado:** terminado. El bloqueo de ANAC seguía (21:53 UTC): no se probó contra ANAC.
+
+**Verificación:** 38/38 offline; `import src.app` arranca.
