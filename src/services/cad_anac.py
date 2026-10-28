@@ -60,9 +60,49 @@ RUTAS_GET = {
 
 #: Las listas son públicas e iguales para todos: se guardan un rato.
 _LISTAS_PUBLICAS = {"GetFinalidadListItem", "GetAutoridadesListItem", "GetLugarAterrizajeListItem", "GetSimuladoresListItem", "GetModelosPorSimuladorListItem"}
-_TTL_LISTAS = 6 * 3600
-#: Cuánto se reusa una sesión abierta antes de abrir otra.
-_TTL_SESION = 20 * 60
+_TTL_LISTAS = 24 * 3600
+#: Cuánto se reusa una sesión abierta, como mucho. Antes vence la del CAD, y entonces `pedir`
+#: entra de nuevo: cada login es lo que más se nota del lado de ANAC.
+_TTL_SESION = 8 * 3600
+#: La lista de vuelos de un piloto se reusa un rato: abrir "Pasar al CAD" varias veces no
+#: vuelve a pedírsela a ANAC. "Crear" la borra.
+_TTL_VUELOS = 10 * 60
+
+# ------------------------------------------------------- cuidar a ANAC ---
+#
+# ANAC bloquea por horas la IP desde la que se entra varias veces (2026-10-28: primero el VPS,
+# después la salida por amenaba, con 3 logins en media hora). Todos los pilotos salen por la
+# misma IP, así que los dos frenos son de todo el servidor, no de cada piloto:
+#
+# - si ANAC no acepta la conexión, no se le vuelve a pedir nada por `_PAUSA_S`;
+# - no más de `_LOGINS_POR_HORA` logins por hora, entre todos.
+
+_PAUSA_S = 45 * 60
+_LOGINS_POR_HORA = 4
+_pausa_hasta = 0.0
+_logins: list = []
+
+
+def _pausar() -> None:
+    global _pausa_hasta
+    _pausa_hasta = time.monotonic() + _PAUSA_S
+
+
+def _revisar_pausa() -> None:
+    falta = _pausa_hasta - time.monotonic()
+    if falta > 0:
+        minutos = max(1, round(falta / 60))
+        raise AnacNoContesta(
+            f"ANAC no está aceptando conexiones de Vector. Volvemos a probar en {minutos} min; mientras tanto podés usar el marcador."
+        )
+
+
+def _anotar_login() -> None:
+    ahora = time.monotonic()
+    _logins[:] = [t for t in _logins if ahora - t < 3600]
+    if len(_logins) >= _LOGINS_POR_HORA:
+        raise AnacNoContesta("Vector ya entró varias veces a ANAC en la última hora. Probá en un rato o usá el marcador.")
+    _logins.append(ahora)
 
 
 class CadError(Exception):
@@ -174,6 +214,9 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
     `ClaveRechazada` si ANAC devolvió el formulario (no se reintenta); `AnacNoContesta` si
     algo no tiene la forma esperada.
     """
+    if transporte is None:
+        _revisar_pausa()
+        _anotar_login()
     cliente = httpx.AsyncClient(
         # 10 s para conectar: si ANAC no acepta la conexión, se avisa enseguida en vez de
         # esperar lo que el frontend ya no espera.
@@ -224,8 +267,10 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
         if r.status_code != 200 or "dataSource" not in r.text:
             raise AnacNoContesta(f"El CAD no abrió la sesión ({r.status_code}).")
         return cliente
-    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ProxyError) as exc:
         await cliente.aclose()
+        if transporte is None:
+            _pausar()
         raise AnacNoContesta("ANAC no está aceptando conexiones del servidor de Vector. No se guardó nada: probá en un rato o usá el marcador.") from exc
     except httpx.HTTPError as exc:
         await cliente.aclose()
@@ -292,10 +337,14 @@ async def pedir(user_id: str, credenciales, ruta: str, params: Optional[Dict[str
         guardada = _listas.get(clave_lista)
         if guardada and time.monotonic() - guardada[1] < _TTL_LISTAS:
             return guardada[0]
+    _revisar_pausa()
     for intento in range(2):
         cliente = await sesion(user_id, credenciales)
         try:
             r = await cliente.get(API + ruta, params=params or {}, headers={"Accept": "application/json"})
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ProxyError) as exc:
+            _pausar()
+            raise AnacNoContesta("El CAD no contesta. Probá en un rato.") from exc
         except httpx.HTTPError as exc:
             raise AnacNoContesta("El CAD no contesta. Probá en un rato.") from exc
         if r.status_code in (401, 403) or (r.status_code == 302 and intento == 0):
@@ -317,9 +366,22 @@ async def pedir(user_id: str, credenciales, ruta: str, params: Optional[Dict[str
     raise AnacNoContesta("El CAD cerró la sesión.")
 
 
-async def vuelos(user_id: str, credenciales) -> list:
+_vuelos: Dict[str, Tuple[list, float]] = {}
+
+
+async def vuelos(user_id: str, credenciales, fresca: bool = False) -> list:
+    """Los vuelos del piloto en el CAD. `fresca` (sincronizar, "Actualizar") no usa la guardada."""
+    guardada = _vuelos.get(user_id)
+    if guardada and not fresca and time.monotonic() - guardada[1] < _TTL_VUELOS:
+        return guardada[0]
     datos = await pedir(user_id, credenciales, "GetPagedList", _PAGINA_DE_VUELOS)
-    return (datos or {}).get("dataSource") or [] if isinstance(datos, dict) else []
+    lista = (datos or {}).get("dataSource") or [] if isinstance(datos, dict) else []
+    _vuelos[user_id] = (lista, time.monotonic())
+    return lista
+
+
+def olvidar_vuelos(user_id: str) -> None:
+    _vuelos.pop(user_id, None)
 
 
 # ------------------------------------------------------------------ crear ---
@@ -366,6 +428,8 @@ async def crear_vuelo(user_id: str, credenciales, datos: Dict[str, Any]) -> Dict
     rechazó (podría haberlo creado igual); sólo se entra de nuevo si la sesión había vencido.
     """
     vuelo = validar_vuelo(datos)
+    _revisar_pausa()
+    olvidar_vuelos(user_id)
     for intento in range(2):
         cliente = await sesion(user_id, credenciales)
         try:
@@ -389,7 +453,7 @@ async def crear_vuelo(user_id: str, credenciales, datos: Dict[str, Any]) -> Dict
 # ------------------------------------------------------------ sincronizar ---
 
 #: Cada cuánto, como mucho, se sincroniza solo un piloto: cada vez es entrar a ANAC.
-INTERVALO_SINCRONIZACION_H = 12
+INTERVALO_SINCRONIZACION_H = 24
 #: `GetPagedList` trae hasta 1000: con la lista llena puede estar cortada.
 TOPE_LISTA = 1000
 

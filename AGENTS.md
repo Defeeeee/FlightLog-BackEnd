@@ -1741,3 +1741,16 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 - Se marca sólo con una coincidencia única (misma salida al minuto y matrícula; los simuladores, sin matrícula).
 - Nunca crea vuelos.
 **Estado:** terminado. **Verificación:** `test_cad_anac.py` 30/30, `ruff`, `import src.app`.
+
+### 2026-10-28 21:54 UTC — Claude Code / Opus 5.5 — Cuidar a ANAC: pausa, tope de logins, menos pedidos
+
+**Qué cambié:**
+- `src/services/cad_anac.py`: `_revisar_pausa`/`_pausar` (45 min sin pedirle nada a ANAC después de un ConnectError, ConnectTimeout, RemoteProtocolError o ProxyError), `_anotar_login` (como mucho 4 logins por hora entre todos los pilotos), `_TTL_SESION` 20 min → 8 h, `_TTL_LISTAS` 6 h → 24 h, `vuelos(..., fresca)` con la lista guardada 10 min y `olvidar_vuelos` (lo llama "Crear"), `INTERVALO_SINCRONIZACION_H` 12 → 24.
+- `src/controllers/cad.py`: sincronizar pide la lista fresca; desconectar olvida la guardada.
+- `test_cad_anac.py`: tres checks nuevos (33).
+
+**Por qué:** ANAC bloquea por horas la IP que entra varias veces: el VPS a las 15 UTC y la salida por amenaba (casa de Federico) a las 17:07, después de 3 logins en media hora. Seguían bloqueados a las 21:53. Todos los pilotos salen por la misma IP, así que los frenos son globales y en memoria (un solo proceso). Un reinicio los borra: se aceptó, porque un deploy no ocurre en medio de un bloqueo a propósito. Se descartó rotar IPs para esquivarlo.
+
+**Estado:** terminado; el bloqueo de ANAC sigue.
+
+**Verificación:** 33/33 offline. Contra ANAC no: no contesta.

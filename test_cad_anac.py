@@ -186,5 +186,40 @@ check("dos vuelos de Vector para uno del CAD: se marca uno solo", sum(1 for _, c
 sin_cambios = cad_anac.conciliar([dict(VUELOS[0], cad_estado="PENDIENTE DE DDJJ")], CAD_LISTA, "x")
 check("sin cambios, no se escribe nada", sin_cambios == [])
 
+# --- cuidar a ANAC: la pausa y el tope de logins son de todo el servidor ---
+cad_anac._pausa_hasta = 0.0
+cad_anac._logins.clear()
+for _ in range(cad_anac._LOGINS_POR_HORA):
+    cad_anac._anotar_login()
+try:
+    cad_anac._anotar_login()
+    check("el tope de logins por hora frena", False)
+except cad_anac.AnacNoContesta:
+    check("el tope de logins por hora frena", True)
+cad_anac._logins.clear()
+cad_anac._pausar()
+try:
+    asyncio.run(cad_anac.pedir("u", None, "GetPagedList"))
+    check("en pausa no se le pide nada a ANAC", False)
+except cad_anac.AnacNoContesta as exc:
+    check("en pausa no se le pide nada a ANAC", "min" in str(exc))
+cad_anac._pausa_hasta = 0.0
+
+
+def sin_conexion(req):
+    raise httpx.ConnectTimeout("bloqueado", request=req)
+
+
+async def _probar_bloqueo():
+    # Con un transporte de prueba no se pausa (los tests no se pisan): se simula sin él.
+    try:
+        await cad_anac.iniciar_sesion("p", "c", transporte=httpx.MockTransport(sin_conexion))
+    except cad_anac.AnacNoContesta:
+        pass
+
+
+asyncio.run(_probar_bloqueo())
+check("con transporte de prueba no queda en pausa", cad_anac._pausa_hasta == 0.0)
+
 print(f"\n{sum(resultados)}/{len(resultados)}")
 sys.exit(0 if all(resultados) else 1)

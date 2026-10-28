@@ -11,7 +11,7 @@ de ANAC con la cuenta que el piloto guardó.
   lecturas del CAD, de la lista blanca.
 - `POST /cad/vuelos`: "Crear" del CAD. El vuelo queda "Pendiente de DDJJ".
 - `POST /cad/sincronizar?forzar=`: compara los vuelos del piloto con los del CAD
-  (`cad_anac.conciliar`, migración 037). Sola, como mucho cada 12 horas; `forzar` es el botón.
+  (`cad_anac.conciliar`, migración 037). Sola, como mucho una vez por día; `forzar` es el botón.
 
 **La DDJJ no está acá a propósito**: la declaración jurada la hace el piloto en el CAD.
 """
@@ -136,6 +136,7 @@ class CadController(Controller):
     async def desconectar(self, request: Request) -> Dict[str, bool]:
         yo = _yo(request)
         await cad_anac.olvidar_sesion(yo)
+        cad_anac.olvidar_vuelos(yo)
         await asyncio.to_thread(lambda: SupabaseManager.get_service_client().table(_TABLA).delete().eq("user_id", yo).execute())
         return {"conectado": False}
 
@@ -191,7 +192,7 @@ class CadController(Controller):
                 return {"sincronizado": False, "motivo": "reciente", "sincronizado_at": ultima}
         ahora = _ahora()
         await asyncio.to_thread(_anotar, yo, {"sincronizado_at": ahora})
-        cad = await _con_cad(yo, lambda: cad_anac.vuelos(yo, _credenciales(yo)))
+        cad = await _con_cad(yo, lambda: cad_anac.vuelos(yo, _credenciales(yo), fresca=True))
 
         def _aplicar() -> Dict[str, Any]:
             cliente = SupabaseManager.get_service_client()
