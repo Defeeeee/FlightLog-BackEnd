@@ -74,6 +74,9 @@ jobs:
         run: python test_adsb.py
 
       - name: Pasar al CAD desde Vector (login de ANAC falso, cifrado, Crear)
+        env:
+          SUPABASE_URL: "https://dummy.supabase.co"
+          SUPABASE_PUBLISHABLE_KEY: "dummy-key"
         run: python test_cad_anac.py
 
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
