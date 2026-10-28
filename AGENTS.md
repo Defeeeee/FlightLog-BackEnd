@@ -1721,3 +1721,9 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 
 **Estado:** desplegado con este commit.
 **Verificación:** desde el VPS, por el proxy, login y CAD contestan 200 (0,2 s) y google.com se rechaza. `test_cad_anac.py` 22/22.
+
+### 2026-10-28 15:40 UTC — Claude Code / Opus 5.5 — Desmarcar un vuelo borrado del CAD
+
+**Qué cambié:** `src/controllers/flights.py`: un PATCH con `cad_vuelo_id: null` también borra `cad_cargado_at`.
+**Por qué:** Federico borró un vuelo en el CAD que Vector tenía marcado como pasado, y no volvía a "Pasar al CAD". El frontend ahora le saca la marca cuando ya no está en la lista del CAD; sin esto quedaba la hora de una carga que ya no existe.
+**Estado:** terminado. **Verificación:** `import src.app`; es una marca del libro (`MARCAS_DEL_LIBRO`), no toca el cobro.

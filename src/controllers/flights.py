@@ -243,6 +243,9 @@ class FlightsController(Controller):
         # Pasado al CAD (migración 029): la hora es la del servidor, no la del navegador.
         if update_data.get("cad_vuelo_id"):
             update_data["cad_cargado_at"] = datetime.now(timezone.utc).isoformat()
+        elif "cad_vuelo_id" in update_data:
+            # Se borró del CAD: vuelve a "Pasar al CAD" (2026-10-28), sin la hora vieja.
+            update_data["cad_cargado_at"] = None
 
         response = supabase_client.table("flights").update(update_data).eq("id", str(flight_id)).eq("user_id", user_id).execute()
         if not response.data:
