@@ -156,5 +156,35 @@ rechaza({**SIM, "simulador": {"simuladorID": "", "nombre": ""}}, "rechaza un sim
 rechaza({**VUELO, "fechaHoraSalida": "17/10/2026"}, "rechaza una fecha mal escrita")
 check("la lista blanca no tiene nada de la DDJJ", not any("ddjj" in r.lower() or "declar" in r.lower() for r in cad_anac.RUTAS_GET))
 
+# --- sincronizar: Vector de acuerdo con el CAD ---
+CAD_LISTA = [
+    {"vueloTripulanteID": 843265, "fechaSalida": "2026-10-17T18:00:00", "matricula": "LV-S100", "estadoDesc": "PENDIENTE DE DDJJ"},
+    {"vueloTripulanteID": 661363, "fechaSalida": "2026-08-22T11:00:00", "matricula": None, "estadoDesc": "DECLARADO"},
+    {"vueloTripulanteID": 900001, "fechaSalida": "2026-10-20T13:00:00", "matricula": "LV-S114", "estadoDesc": "PENDIENTE DE DDJJ"},
+]
+VUELOS = [
+    # marcado, sigue en el CAD: se le pone el estado
+    {"id": "a", "takeoff": "2026-10-17T18:00:00+00:00", "matricula": "LVS100", "es_simulador": False, "cad_vuelo_id": 843265, "cad_estado": None},
+    # marcado, ya no está en el CAD: se desmarca
+    {"id": "b", "takeoff": "2026-10-17T15:55:00+00:00", "matricula": "LVS100", "es_simulador": False, "cad_vuelo_id": 831534, "cad_estado": "PENDIENTE DE DDJJ"},
+    # sin marcar, cargado a mano en el CAD (sin guion en Vector): se marca
+    {"id": "c", "takeoff": "2026-10-20T13:00:00+00:00", "matricula": "LVS114", "es_simulador": False, "cad_vuelo_id": None},
+    # simulador sin marcar: en el CAD no tiene matrícula
+    {"id": "d", "takeoff": "2026-08-22T11:00:00Z", "matricula": "LV-ASG", "es_simulador": True, "cad_vuelo_id": None},
+    # omitido: no se toca
+    {"id": "e", "takeoff": "2026-10-20T13:00:00+00:00", "matricula": "LVS114", "es_simulador": False, "cad_vuelo_id": None, "cad_omitido": "ignorado"},
+]
+cambios = dict(cad_anac.conciliar(VUELOS, CAD_LISTA, "2026-10-28T16:00:00+00:00"))
+check("marcado y en el CAD: el estado", cambios.get("a") == {"cad_estado": "PENDIENTE DE DDJJ"})
+check("marcado y borrado del CAD: se desmarca", cambios.get("b") == {"cad_vuelo_id": None, "cad_cargado_at": None, "cad_estado": None})
+check("cargado a mano en el CAD: se marca con su id y su estado", cambios.get("c", {}).get("cad_vuelo_id") == 900001 and cambios["c"]["cad_estado"] == "PENDIENTE DE DDJJ")
+check("un simulador se reconoce sin matrícula", cambios.get("d", {}).get("cad_vuelo_id") == 661363)
+check("un omitido no se toca", "e" not in cambios)
+check("con la lista vacía no se desmarca nada", cad_anac.conciliar(VUELOS, [], "x") == [])
+dos = [dict(VUELOS[2], id="c1"), dict(VUELOS[2], id="c2")]
+check("dos vuelos de Vector para uno del CAD: se marca uno solo", sum(1 for _, c in cad_anac.conciliar(dos, CAD_LISTA, "x") if c.get("cad_vuelo_id") == 900001) == 1)
+sin_cambios = cad_anac.conciliar([dict(VUELOS[0], cad_estado="PENDIENTE DE DDJJ")], CAD_LISTA, "x")
+check("sin cambios, no se escribe nada", sin_cambios == [])
+
 print(f"\n{sum(resultados)}/{len(resultados)}")
 sys.exit(0 if all(resultados) else 1)

@@ -384,3 +384,81 @@ async def crear_vuelo(user_id: str, credenciales, datos: Dict[str, Any]) -> Dict
         texto = (cuerpo.get("message") or cuerpo.get("exceptionMessage") or cuerpo.get("Message") or "") if isinstance(cuerpo, dict) else ""
         return {"ok": False, "mensaje": f"El CAD no lo aceptó: {texto or f'error {r.status_code}'}"}
     raise AnacNoContesta("El CAD cerró la sesión.")
+
+
+# ------------------------------------------------------------ sincronizar ---
+
+#: Cada cuánto, como mucho, se sincroniza solo un piloto: cada vez es entrar a ANAC.
+INTERVALO_SINCRONIZACION_H = 12
+#: `GetPagedList` trae hasta 1000: con la lista llena puede estar cortada.
+TOPE_LISTA = 1000
+
+
+def matricula_cad(m: Optional[str]) -> str:
+    """"LVS114" → "LV-S114", como la escribe ANAC (igual que `matriculaCad` del frontend)."""
+    s = re.sub(r"\s+", "", (m or "").upper())
+    if s.startswith("LV-") or not re.match(r"^LV[A-Z0-9]", s):
+        return s
+    return f"LV-{s[2:]}"
+
+
+def _al_minuto(v: Any) -> str:
+    """Una fecha de Vector (con zona) o del CAD (UTC sin zona) → "AAAA-MM-DDTHH:MM" en UTC."""
+    from datetime import datetime, timezone
+
+    texto = str(v or "")
+    if not texto:
+        return ""
+    try:
+        d = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if d.tzinfo:
+        d = d.astimezone(timezone.utc)
+    return d.strftime("%Y-%m-%dT%H:%M")
+
+
+def conciliar(vuelos: list, cad: list, ahora: str) -> list:
+    """
+    Lo que hay que cambiar en Vector para que diga lo mismo que el CAD. `vuelos`: dicts con
+    `id`, `takeoff`, `matricula`, `es_simulador`, `cad_vuelo_id`, `cad_estado`, `cad_omitido`.
+    `cad`: la lista de `GetPagedList`. Devuelve `[(flight_id, cambios)]`.
+
+    - Un vuelo marcado cuyo id sigue en el CAD: se le actualiza el estado ("PENDIENTE DE DDJJ"…).
+    - Uno marcado que ya no está: se desmarca, **sólo con la lista entera** (ni vacía, que puede
+      ser una lectura fallida, ni llena hasta el tope, que puede estar cortada).
+    - Uno sin marcar (y no omitido) que coincide con uno del CAD sin dueño, misma salida al
+      minuto y misma matrícula (un simulador no tiene matrícula en el CAD): se marca. Sólo si la
+      coincidencia es única: marcar el vuelo equivocado lo sacaría de "Pasar al CAD".
+    """
+    completa = 0 < len(cad) < TOPE_LISTA
+    por_id = {}
+    for c in cad:
+        try:
+            por_id[int(c.get("vueloTripulanteID"))] = c
+        except (TypeError, ValueError):
+            continue
+    ligados = {int(f["cad_vuelo_id"]) for f in vuelos if f.get("cad_vuelo_id")}
+    libres: Dict[Tuple[str, str], list] = {}
+    for cid, c in por_id.items():
+        if cid not in ligados:
+            libres.setdefault((_al_minuto(c.get("fechaSalida")), matricula_cad(c.get("matricula"))), []).append(cid)
+
+    estado_de = lambda c: (str(c.get("estadoDesc") or "").strip()[:60] or None)  # noqa: E731
+    cambios = []
+    for f in vuelos:
+        cid = f.get("cad_vuelo_id")
+        if cid:
+            c = por_id.get(int(cid))
+            if c is not None:
+                if estado_de(c) != f.get("cad_estado"):
+                    cambios.append((f["id"], {"cad_estado": estado_de(c)}))
+            elif completa:
+                cambios.append((f["id"], {"cad_vuelo_id": None, "cad_cargado_at": None, "cad_estado": None}))
+        elif not f.get("cad_omitido"):
+            clave = (_al_minuto(f.get("takeoff")), "" if f.get("es_simulador") else matricula_cad(f.get("matricula")))
+            candidatos = libres.get(clave) or []
+            if clave[0] and len(candidatos) == 1:
+                nuevo = candidatos.pop()
+                cambios.append((f["id"], {"cad_vuelo_id": nuevo, "cad_cargado_at": ahora, "cad_estado": estado_de(por_id[nuevo])}))
+    return cambios

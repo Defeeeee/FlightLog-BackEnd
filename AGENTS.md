@@ -1727,3 +1727,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Qué cambié:** `src/controllers/flights.py`: un PATCH con `cad_vuelo_id: null` también borra `cad_cargado_at`.
 **Por qué:** Federico borró un vuelo en el CAD que Vector tenía marcado como pasado, y no volvía a "Pasar al CAD". El frontend ahora le saca la marca cuando ya no está en la lista del CAD; sin esto quedaba la hora de una carga que ya no existe.
 **Estado:** terminado. **Verificación:** `import src.app`; es una marca del libro (`MARCAS_DEL_LIBRO`), no toca el cobro.
+
+### 2026-10-28 15:51 UTC — Claude Code / Opus 5.5 — El CAD se sincroniza solo (migración 037)
+
+**Qué cambié:**
+- `migrations/037_cad_sincronizado.sql` (**aplicada en producción**, OK de Federico): `cad_conexiones.sincronizado_at` y `flights.cad_estado`.
+- `src/services/cad_anac.py`: `conciliar` (pura), `matricula_cad`, `INTERVALO_SINCRONIZACION_H` = 12, `TOPE_LISTA`.
+- `src/controllers/cad.py`: `POST /cad/sincronizar?forzar=`. `src/models/flight.py`: `cad_estado`.
+- `test_cad_anac.py`: 30 casos.
+**Por qué:** Vector y el CAD tienen que decir lo mismo sin que el piloto abra el panel: los vuelos borrados allá, los cargados a mano y, sobre todo, cuáles esperan la DDJJ.
+- La hora se anota **antes** de entrar a ANAC: si falla, tampoco se reintenta hasta el próximo intervalo (ANAC ya bloqueó la IP del VPS una vez).
+- Se desmarca sólo con la lista del CAD entera (ni vacía ni en el tope de 1000).
+- Se marca sólo con una coincidencia única (misma salida al minuto y matrícula; los simuladores, sin matrícula).
+- Nunca crea vuelos.
+**Estado:** terminado. **Verificación:** `test_cad_anac.py` 30/30, `ruff`, `import src.app`.

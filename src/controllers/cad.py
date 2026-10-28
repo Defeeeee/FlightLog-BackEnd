@@ -10,6 +10,8 @@ de ANAC con la cuenta que el piloto guardó.
 - `GET /cad/listas`, `GET /cad/vuelos`, `GET /cad/vuelos/{id}`, `GET /cad/modelos?simId=`:
   lecturas del CAD, de la lista blanca.
 - `POST /cad/vuelos`: "Crear" del CAD. El vuelo queda "Pendiente de DDJJ".
+- `POST /cad/sincronizar?forzar=`: compara los vuelos del piloto con los del CAD
+  (`cad_anac.conciliar`, migración 037). Sola, como mucho cada 12 horas; `forzar` es el botón.
 
 **La DDJJ no está acá a propósito**: la declaración jurada la hace el piloto en el CAD.
 """
@@ -17,7 +19,7 @@ de ANAC con la cuenta que el piloto guardó.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from litestar import Controller, Request, delete, get, post
@@ -40,7 +42,7 @@ class Conexion(BaseModel):
 def _fila(user_id: str) -> Optional[Dict[str, Any]]:
     filas = (
         SupabaseManager.get_service_client().table(_TABLA)
-        .select("usuario,clave_cifrada,estado,error,conectado_at,usado_at")
+        .select("usuario,clave_cifrada,estado,error,conectado_at,usado_at,sincronizado_at")
         .eq("user_id", user_id).limit(1).execute().data
         or []
     )
@@ -170,6 +172,60 @@ class CadController(Controller):
         return await _con_cad(
             yo, lambda: _envolver(cad_anac.pedir(yo, _credenciales(yo), "GetModelosPorSimuladorListItem", {"simId": str(simId)}))
         )
+
+    @post("/sincronizar", status_code=200)
+    async def sincronizar(self, request: Request, forzar: bool = False) -> Dict[str, Any]:
+        """
+        Pone a Vector de acuerdo con el CAD: estados, vuelos borrados allá y vuelos cargados a
+        mano. **Nunca crea vuelos** en ningún lado. La hora se anota antes de entrar a ANAC: si
+        falla, tampoco se reintenta hasta el próximo intervalo.
+        """
+        yo = _yo(request)
+        fila = await asyncio.to_thread(_fila, yo)
+        if not cad_anac.disponible() or not fila or fila.get("estado") != "ok":
+            return {"sincronizado": False, "motivo": "sin_conexion"}
+        ultima = fila.get("sincronizado_at")
+        if ultima and not forzar:
+            hace = datetime.now(timezone.utc) - datetime.fromisoformat(str(ultima).replace("Z", "+00:00"))
+            if hace < timedelta(hours=cad_anac.INTERVALO_SINCRONIZACION_H):
+                return {"sincronizado": False, "motivo": "reciente", "sincronizado_at": ultima}
+        ahora = _ahora()
+        await asyncio.to_thread(_anotar, yo, {"sincronizado_at": ahora})
+        cad = await _con_cad(yo, lambda: cad_anac.vuelos(yo, _credenciales(yo)))
+
+        def _aplicar() -> Dict[str, Any]:
+            cliente = SupabaseManager.get_service_client()
+            aviones = {
+                a["id"]: a
+                for a in (cliente.table("aircraft").select("id,registration,is_simulator").eq("user_id", yo).execute().data or [])
+            }
+            filas = (
+                cliente.table("flights").select("id,takeoff,aircraft_id,cad_vuelo_id,cad_estado,cad_omitido").eq("user_id", yo).execute().data or []
+            )
+            vuelos = [
+                {
+                    **f,
+                    "matricula": (aviones.get(f.get("aircraft_id")) or {}).get("registration"),
+                    "es_simulador": bool((aviones.get(f.get("aircraft_id")) or {}).get("is_simulator")),
+                }
+                for f in filas
+            ]
+            cambios = cad_anac.conciliar(vuelos, cad, ahora)
+            for flight_id, c in cambios:
+                cliente.table("flights").update(c).eq("id", flight_id).eq("user_id", yo).execute()
+            resultado = {
+                "sincronizado": True,
+                "sincronizado_at": ahora,
+                "desmarcados": sum(1 for _, c in cambios if "cad_vuelo_id" in c and c["cad_vuelo_id"] is None),
+                "marcados": sum(1 for _, c in cambios if c.get("cad_vuelo_id")),
+                "estados": sum(1 for _, c in cambios if set(c) == {"cad_estado"}),
+            }
+            estados = {f["id"]: f.get("cad_estado") for f in filas}
+            estados.update({fid: c["cad_estado"] for fid, c in cambios if "cad_estado" in c})
+            resultado["pendientes_ddjj"] = sum(1 for e in estados.values() if e and "PENDIENTE" in e.upper())
+            return resultado
+
+        return await asyncio.to_thread(_aplicar)
 
     @post("/vuelos", status_code=200)
     async def crear(self, request: Request, data: Dict[str, Any]) -> Dict[str, Any]:

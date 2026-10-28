@@ -51,6 +51,8 @@ class Flight(BaseModel):
     #: Quién certifica el vuelo en el CAD (migración 032): id de la lista del CAD y nombre.
     cad_autoridad_id: Optional[int] = None
     cad_autoridad_nombre: Optional[str] = None
+    #: El estado del vuelo en el CAD ("PENDIENTE DE DDJJ", …), de la última sincronización (037).
+    cad_estado: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
