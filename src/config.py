@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # los reportes se guardan igual y se revisan en la tabla `reportes`.
     admins_red: Optional[str] = Field(default=None, validation_alias="ADMINS_RED")
 
+    # Pasar al CAD desde Vector (migración 036): la clave Fernet con la que se cifra la
+    # contraseña de ANAC que guarda el piloto. Sin ella el modo queda apagado —falla cerrado,
+    # como `documents_alert_secret`— y sigue andando el marcador.
+    cad_clave_cifrado: Optional[str] = Field(default=None, validation_alias="CAD_CLAVE_CIFRADO")
+
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
     google_client_secret: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")

@@ -36,6 +36,7 @@ from src.controllers.resumen_mensual import ResumenMensualController
 from src.controllers.mails import MailsController
 from src.controllers.qr import QrController
 from src.controllers.adsb import AdsbController
+from src.controllers.cad import CadController
 from src.controllers.publicaciones import (
     AvatarController,
     PublicacionesController,
@@ -126,6 +127,8 @@ api_router = Router(
         QrController,
         # Los recorridos ADS-B de los vuelos y los vuelos detectados de un avión.
         AdsbController,
+        # Pasar al CAD de ANAC desde Vector, con la cuenta que guardó el piloto.
+        CadController,
     ],
     dependencies={
         "supabase_client": Provide(AuthHandler.provide_supabase_client)

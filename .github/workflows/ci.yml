@@ -73,6 +73,9 @@ jobs:
       - name: Grabador ADS-B
         run: python test_adsb.py
 
+      - name: Pasar al CAD desde Vector (login de ANAC falso, cifrado, Crear)
+        run: python test_cad_anac.py
+
       # También offline. Atrapa la clase de bug que estuvo viva desde la migración
       # 009: un campo tipado `NoneType` porque se llama igual que un tipo importado.
       # No rompe el import ni el arranque, así que el paso de arriba no lo ve.

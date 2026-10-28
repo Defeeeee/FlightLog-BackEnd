@@ -1688,3 +1688,22 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado.
 
 **Verificación:** `test_adsb.py` 40/40, con una navegación de prueba: 20 min sin señal en altura, aterrizaje, corte de 50 min, y la vuelta entra entera. El pedido por código contra adsb.fi responde bien; ninguno de esos aviones estaba volando a esa hora.
+
+### 2026-10-28 15:14 UTC — Claude Code / Opus 5.5 — Pasar al CAD desde Vector (migración 036)
+
+**Qué cambié:**
+- `migrations/036_cad_desde_vector.sql` (**aplicada en producción**, OK de Federico): `cad_conexiones` (usuario y contraseña de ANAC **cifrada**, estado ok/rechazada; sólo service role, se borra con la cuenta) y `aircraft.cad_simulador` (jsonb).
+- `src/services/cad_anac.py` (nuevo): el login de ANAC como lo hace el portal del CAD (OIDC implícito con el cliente `portalAplicaciones`, el formulario con su token antifalsificación, el token del fragmento y `cookiePorUsuario` para la cookie de `foliadoweb`), sesiones en memoria por 20 min, listas públicas en memoria por 6 h, una **lista blanca** de lecturas (`RUTAS_GET`) y "Crear" con el vuelo revisado (`validar_vuelo`). El cifrado es Fernet con `CAD_CLAVE_CIFRADO`.
+- `src/controllers/cad.py` (nuevo): `/cad/conexion` (GET, POST, DELETE), `/cad/listas`, `/cad/vuelos`, `/cad/vuelos/{id}`, `/cad/modelos` y `POST /cad/vuelos`. `src/app.py` lo registra; `src/config.py`: `cad_clave_cifrado`.
+- `src/models/aircraft.py`: `cad_simulador`, validado (`validar_simulador_cad`).
+- `requirements.txt`: `cryptography` y `httpx` explícitos (ya venían como dependencias de otras). `test_cad_anac.py` (22 casos) y su paso en el CI.
+- En el VPS: `CAD_CLAVE_CIFRADO` agregada al `.env` (generada allá, `chmod 600`; copia del anterior en `.env.antes-036`).
+
+**Por qué:** Federico decidió ofrecer dos modos para pasar vuelos al CAD: el marcador (la contraseña nunca pasa por Vector) o guardarla y que el backend entre por el piloto, que es lo único que anda en el teléfono. El VPS llega a ANAC; la red de Federico no.
+- **Una contraseña rechazada no se reintenta nunca**: ANAC tiene "Recupero y desbloqueo" y varias equivocaciones probablemente bloquean la cuenta. La conexión queda 'rechazada' hasta que el piloto la escriba de nuevo. Lo que no tiene la forma esperada (formulario cambiado, sin token) es `AnacNoContesta`, no un rechazo.
+- **La DDJJ no está**: ni en la lista blanca ni en ningún endpoint. La declaración jurada la hace el piloto.
+- Sin `CAD_CLAVE_CIFRADO` el modo queda apagado (falla cerrado) y sigue el marcador.
+
+**Estado:** desplegado con este commit. **No se probó contra ANAC con una cuenta real** (no se escriben contraseñas ajenas): el flujo se armó leyendo el JS del portal y el formulario real, y el test usa un ANAC falso con las mismas redirecciones. La primera conexión real la hace Federico; si falla, el mensaje dice en qué paso.
+
+**Verificación:** `test_cad_anac.py` 22/22, `ruff`, `import src.app`. La migración se verificó: RLS prendido y sin permisos para `anon` ni `authenticated`.

@@ -4,6 +4,34 @@ from uuid import UUID
 
 from src.models.plan_vuelo import validar_perfil_avion
 
+
+CLASES_SIMULADOR = {"ATD", "BATD", "PCATD", "A", "B", "C", "D", "1", "2", "3", "4", "5", "6", "7"}
+
+
+def validar_simulador_cad(v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    El simulador del CAD de un equipo (migración 036): id y nombre de `GetSimuladoresListItem`,
+    la clase del dispositivo y el modelo que el CAD le asocia. Lo elige el piloto en el panel.
+    """
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise ValueError("cad_simulador inválido")
+    try:
+        sid = int(v.get("id"))
+    except (TypeError, ValueError):
+        raise ValueError("cad_simulador.id inválido")
+    nombre = str(v.get("nombre") or "").strip()[:200]
+    clase = str(v.get("clase") or "").strip().upper()
+    if sid <= 0 or not nombre or clase not in CLASES_SIMULADOR:
+        raise ValueError("cad_simulador incompleto")
+    try:
+        modelo_id = int(v.get("modeloId")) if v.get("modeloId") is not None else None
+    except (TypeError, ValueError):
+        modelo_id = None
+    modelo = str(v.get("modelo") or "").strip()[:80] or None
+    return {"id": sid, "nombre": nombre, "clase": clase, "modeloId": modelo_id if modelo else None, "modelo": modelo if modelo_id else None}
+
 class Aircraft(BaseModel):
     id: UUID
     user_id: UUID
@@ -34,6 +62,8 @@ class Aircraft(BaseModel):
     #: Lo fijo del avión para el plan de vuelo (migración 024): casilla 10,
     #: NAV/PBN/PER/OPR, color, ELT, observación fija. Lo arma y lo lee el frontend.
     plan_vuelo: Optional[Dict[str, Any]] = None
+    #: Si es simulador, cuál es en el CAD de ANAC (migración 036).
+    cad_simulador: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,3 +126,11 @@ class AircraftUpdate(BaseModel):
     def _plan_vuelo(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return validar_perfil_avion(v)
 
+
+    #: Si es simulador, cuál es en el CAD de ANAC (migración 036). Lo elige el panel.
+    cad_simulador: Optional[Dict[str, Any]] = None
+
+    @field_validator("cad_simulador")
+    @classmethod
+    def _cad_simulador(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        return validar_simulador_cad(v)
