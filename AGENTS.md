@@ -1717,7 +1717,7 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 
 **Por qué:** la primera conexión real de Federico dio `ConnectTimeout`. Desde las 15 UTC el VPS no llega a ningún host de ANAC (login, CAD ni www: la conexión no se abre), y a las 14:30 entraba. `argentina.gob.ar` sí contesta, y desde el navegador de Federico el CAD responde en 131 ms. Es un bloqueo de ANAC a la IP del VPS (Oracle, São Paulo): o por las pruebas del día, o a IPs de afuera. Amenaba tiene IP argentina y llega en 13 ms. El TLS va de punta a punta, así que el proxy no ve usuarios ni contraseñas.
 - Se descartó usar amenaba como exit node del VPS: mandaría todo el tráfico del VPS por la casa de Federico.
-- **Si amenaba se apaga, el modo "desde Vector" no anda**: el mensaje lo dice y queda el marcador. Si ANAC desbloquea el VPS, alcanza con borrar `CAD_PROXY`.
+- **(Desde el 2026-10-28 22:5x el proxy está en DefeServer, ver la entrada de esa hora.)** Si amenaba se apaga, el modo "desde Vector" no anda: el mensaje lo dice y queda el marcador. Si ANAC desbloquea el VPS, alcanza con borrar `CAD_PROXY`.
 
 **Estado:** desplegado con este commit.
 **Verificación:** desde el VPS, por el proxy, login y CAD contestan 200 (0,2 s) y google.com se rechaza. `test_cad_anac.py` 22/22.
@@ -1769,3 +1769,16 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado. El bloqueo de ANAC seguía (21:53 UTC): no se probó contra ANAC.
 
 **Verificación:** 38/38 offline; `import src.app` arranca.
+
+### 2026-10-28 22:52 UTC — Claude Code / Opus 5.5 — El proxy a ANAC pasa a DefeServer
+
+**Qué cambié:**
+- En `DefeServer` (RHEL 10, Tailscale 100.112.141.102), con OK explícito de Federico: `~/proxy-anac/proxy-anac.py` (el mismo de amenaba, escuchando en 100.112.141.102:8899) y el servicio `proxy-anac` de systemd, habilitado.
+- En el VPS: `CAD_PROXY=http://100.112.141.102:8899` en el `.env` (respaldo en `.env.antes-defeserver`) y reinicio con el deploy manual.
+- En amenaba: `proxy-anac` apagado y deshabilitado (los archivos quedan).
+
+**Por qué:** ANAC bloqueó la IP de amenaba (201.216.227.15) a las 17:07 UTC y a las 22:43 seguía. DefeServer sale por otra IP (190.138.43.120) y llegaba a ANAC en 36 ms. Federico lo eligió sabiendo que, si ANAC la bloquea, esa red también queda sin CAD; ahora entra con los frenos de las dos entradas anteriores (login cada 8 h como mucho, encabezados de navegador).
+
+**Estado:** terminado. Falta el primer login real por el proxy nuevo.
+
+**Verificación:** desde el VPS, `curl -x` por el proxy: el login de ANAC da 200 en 0,18 s y google.com queda rechazado. `settings.cad_proxy` del backend reiniciado apunta a DefeServer.
