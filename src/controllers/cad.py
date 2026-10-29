@@ -12,6 +12,8 @@ de ANAC con la cuenta que el piloto guardó.
 - `POST /cad/vuelos`: "Crear" del CAD. El vuelo queda "Pendiente de DDJJ".
 - `POST /cad/sincronizar?forzar=`: compara los vuelos del piloto con los del CAD
   (`cad_anac.conciliar`, migración 037). Sola, como mucho una vez por día; `forzar` es el botón.
+- `POST /cad/conciliar` (2026-10-29): lo mismo, con la lista del CAD que leyó el navegador del
+  piloto (la extensión o el marcador). **No le habla a ANAC**, así que anda con el modo apagado.
 
 **La DDJJ no está acá a propósito**: la declaración jurada la hace el piloto en el CAD.
 """
@@ -32,6 +34,51 @@ from src.services import cad_anac
 from src.supabase_client import SupabaseManager
 
 _TABLA = "cad_conexiones"
+
+
+class VueloDelCad(BaseModel):
+    vueloTripulanteID: int  # noqa: N815 (como lo manda el CAD)
+    fechaSalida: str = Field(default="", max_length=40)  # noqa: N815
+    matricula: Optional[str] = Field(default=None, max_length=20)
+    estadoDesc: Optional[str] = Field(default=None, max_length=60)  # noqa: N815
+
+
+class ListaDelCad(BaseModel):
+    vuelos: list[VueloDelCad] = Field(max_length=1000)
+
+
+def _conciliar_y_anotar(yo: str, cad: list, ahora: str) -> Dict[str, Any]:
+    """Aplica `cad_anac.conciliar` a los vuelos del piloto y cuenta qué cambió."""
+    cliente = SupabaseManager.get_service_client()
+    aviones = {
+        a["id"]: a
+        for a in (cliente.table("aircraft").select("id,registration,is_simulator").eq("user_id", yo).execute().data or [])
+    }
+    filas = (
+        cliente.table("flights").select("id,takeoff,aircraft_id,cad_vuelo_id,cad_estado,cad_omitido").eq("user_id", yo).execute().data or []
+    )
+    vuelos = [
+        {
+            **f,
+            "matricula": (aviones.get(f.get("aircraft_id")) or {}).get("registration"),
+            "es_simulador": bool((aviones.get(f.get("aircraft_id")) or {}).get("is_simulator")),
+        }
+        for f in filas
+    ]
+    cambios = cad_anac.conciliar(vuelos, cad, ahora)
+    for flight_id, c in cambios:
+        cliente.table("flights").update(c).eq("id", flight_id).eq("user_id", yo).execute()
+    resultado = {
+        "sincronizado": True,
+        "sincronizado_at": ahora,
+        "desmarcados": sum(1 for _, c in cambios if "cad_vuelo_id" in c and c["cad_vuelo_id"] is None),
+        "marcados": sum(1 for _, c in cambios if c.get("cad_vuelo_id")),
+        "estados": sum(1 for _, c in cambios if set(c) == {"cad_estado"}),
+    }
+    estados = {f["id"]: f.get("cad_estado") for f in filas}
+    estados.update({fid: c["cad_estado"] for fid, c in cambios if "cad_estado" in c})
+    resultado["pendientes_ddjj"] = sum(1 for e in estados.values() if e and "PENDIENTE" in e.upper())
+    return resultado
 
 
 class Conexion(BaseModel):
@@ -194,39 +241,25 @@ class CadController(Controller):
         await asyncio.to_thread(_anotar, yo, {"sincronizado_at": ahora})
         cad = await _con_cad(yo, lambda: cad_anac.vuelos(yo, _credenciales(yo), fresca=True))
 
-        def _aplicar() -> Dict[str, Any]:
-            cliente = SupabaseManager.get_service_client()
-            aviones = {
-                a["id"]: a
-                for a in (cliente.table("aircraft").select("id,registration,is_simulator").eq("user_id", yo).execute().data or [])
-            }
-            filas = (
-                cliente.table("flights").select("id,takeoff,aircraft_id,cad_vuelo_id,cad_estado,cad_omitido").eq("user_id", yo).execute().data or []
-            )
-            vuelos = [
-                {
-                    **f,
-                    "matricula": (aviones.get(f.get("aircraft_id")) or {}).get("registration"),
-                    "es_simulador": bool((aviones.get(f.get("aircraft_id")) or {}).get("is_simulator")),
-                }
-                for f in filas
-            ]
-            cambios = cad_anac.conciliar(vuelos, cad, ahora)
-            for flight_id, c in cambios:
-                cliente.table("flights").update(c).eq("id", flight_id).eq("user_id", yo).execute()
-            resultado = {
-                "sincronizado": True,
-                "sincronizado_at": ahora,
-                "desmarcados": sum(1 for _, c in cambios if "cad_vuelo_id" in c and c["cad_vuelo_id"] is None),
-                "marcados": sum(1 for _, c in cambios if c.get("cad_vuelo_id")),
-                "estados": sum(1 for _, c in cambios if set(c) == {"cad_estado"}),
-            }
-            estados = {f["id"]: f.get("cad_estado") for f in filas}
-            estados.update({fid: c["cad_estado"] for fid, c in cambios if "cad_estado" in c})
-            resultado["pendientes_ddjj"] = sum(1 for e in estados.values() if e and "PENDIENTE" in e.upper())
-            return resultado
+        return await asyncio.to_thread(_conciliar_y_anotar, yo, cad, ahora)
 
-        return await asyncio.to_thread(_aplicar)
+    @post("/conciliar", status_code=200)
+    async def conciliar(self, request: Request, data: ListaDelCad) -> Dict[str, Any]:
+        """La lista del CAD que leyó el navegador del piloto: Vector se pone de acuerdo con ella."""
+        yo = _yo(request)
+        cad = [v.model_dump() for v in data.vuelos]
+        ahora = _ahora()
+        resultado = await asyncio.to_thread(_conciliar_y_anotar, yo, cad, ahora)
+
+        def _leido() -> None:
+            # Migración 038. Si falla, la conciliación ya quedó: sólo falta la hora.
+            try:
+                SupabaseManager.get_service_client().table("profiles").update({"cad_leido_at": ahora}).eq("id", yo).execute()
+            except Exception:  # noqa: BLE001
+                pass
+
+        await asyncio.to_thread(_leido)
+        return resultado
 
     @post("/vuelos", status_code=200)
     async def crear(self, request: Request, data: Dict[str, Any]) -> Dict[str, Any]:

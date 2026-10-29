@@ -19,6 +19,9 @@ class Profile(BaseModel):
     #: Ver migración 016. A propósito ausente de `ProfileUpdate`: no es un campo
     #: que el piloto pueda tocar de sí mismo.
     jeppesen_access: bool = False
+    #: La última vez que Vector leyó el CAD del piloto (migración 038). Lo escribe
+    #: `POST /cad/conciliar`; tampoco está en `ProfileUpdate`.
+    cad_leido_at: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

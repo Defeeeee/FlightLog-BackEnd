@@ -1795,3 +1795,15 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** apagado. Con `disponible: false`, la pantalla del frontend ofrece el marcador, Registrar vuelo no ofrece "Cargarlo en tu CAD" y la sincronización contesta `sin_conexion`. La cuenta guardada de Federico sigue cifrada en `cad_conexiones` hasta que la desconecte. `proxy-anac` sigue corriendo en DefeServer sin uso.
 
 **Verificación:** 40/40 offline.
+
+### 2026-10-29 13:43 UTC — Claude Code / Opus 5.5 — POST /cad/conciliar y profiles.cad_leido_at (migración 038, sin aplicar)
+
+**Qué cambié:**
+- `src/controllers/cad.py`: `POST /cad/conciliar` recibe la lista del CAD que leyó el navegador del piloto (`ListaDelCad`, hasta 1000), aplica `cad_anac.conciliar` y anota `profiles.cad_leido_at`. No le habla a ANAC, así que anda con el modo "desde Vector" apagado. `_conciliar_y_anotar` lo comparte con `/sincronizar`.
+- `migrations/038_cad_leido.sql` (nueva): `profiles.cad_leido_at timestamptz`. **Sin aplicar**: falta el OK de Federico. Sin ella, la conciliación anda y la hora no se guarda (el `update` va en un `try`).
+- `src/models/profile.py`: `cad_leido_at` en `Profile` (no en `ProfileUpdate`).
+
+**Por qué:** la extensión y el marcador pasan a ser un puente y el panel está en Vector (frontend 2.36.0). El backend recibe lo que leyó el navegador del piloto para que el estado de cada vuelo y los borrados queden en la base, y guarda cuándo, para que la Bitácora y el inicio digan de cuándo es y recomienden actualizar. La lista viene del cliente: un piloto sólo puede cambiar los campos `cad_*` de sus propios vuelos.
+
+**Estado:** hecho; falta aplicar la 038.
+**Verificación:** `import src.app` arranca; 40/40 en `test_cad_anac.py`. El endpoint, sólo contra el backend falso del frontend.
