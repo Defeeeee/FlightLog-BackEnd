@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # (`http://100.87.63.118:8899`, en defeserver-amenaba). ANAC dejó de aceptar conexiones del
     # VPS el 2026-10-28. Sin configurar, se sale directo.
     cad_proxy: Optional[str] = Field(default=None, validation_alias="CAD_PROXY")
+    # El modo "desde Vector" prendido. Apagado desde el 2026-10-29: ANAC bloqueó cada IP desde
+    # la que entró el backend. Apagado, la pantalla ofrece el marcador y el backend no le pide
+    # nada a ANAC; las cuentas guardadas quedan (cifradas) hasta que el piloto las desconecte.
+    cad_desde_vector: bool = Field(default=False, validation_alias="CAD_DESDE_VECTOR")
 
     # Google OAuth Configuration
     google_client_id: Optional[str] = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")

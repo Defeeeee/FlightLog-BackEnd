@@ -180,7 +180,12 @@ def _fernet() -> Optional[Fernet]:
 
 
 def disponible() -> bool:
-    return _fernet() is not None
+    return bool(settings.cad_desde_vector) and _fernet() is not None
+
+
+def _exigir_prendido() -> None:
+    if not settings.cad_desde_vector:
+        raise ModoApagado("Pasar al CAD desde Vector está pausado. Usá el marcador.")
 
 
 def cifrar(texto: str) -> str:
@@ -259,6 +264,7 @@ async def iniciar_sesion(usuario: str, clave: str, transporte: Optional[httpx.As
     algo no tiene la forma esperada.
     """
     if transporte is None:
+        _exigir_prendido()
         _revisar_pausa()
         _anotar_login()
     cliente = _cliente(transporte)
@@ -477,6 +483,7 @@ async def pedir(user_id: str, credenciales, ruta: str, params: Optional[Dict[str
     clave_detalle = f"{user_id}:{clave_lista}"
     if ruta == "Get" and clave_detalle in _detalles:
         return _detalles[clave_detalle]
+    _exigir_prendido()
     _revisar_pausa()
     for intento in range(2):
         cliente = await sesion(user_id, credenciales)
@@ -573,6 +580,7 @@ async def crear_vuelo(user_id: str, credenciales, datos: Dict[str, Any]) -> Dict
     rechazó (podría haberlo creado igual); sólo se entra de nuevo si la sesión había vencido.
     """
     vuelo = validar_vuelo(datos)
+    _exigir_prendido()
     _revisar_pausa()
     olvidar_vuelos(user_id)
     for intento in range(2):

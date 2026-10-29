@@ -18,6 +18,8 @@ from cryptography.fernet import Fernet
 os.environ["CAD_CACHE_DIR"] = tempfile.mkdtemp()
 
 from src.config import settings
+
+settings.cad_desde_vector = True
 from src.services import cad_anac
 
 resultados = []
@@ -246,6 +248,16 @@ async def _sesion_guardada():
 
 
 asyncio.run(_sesion_guardada())
+
+# --- apagado ---
+settings.cad_desde_vector = False
+check("apagado, el modo no está disponible", not cad_anac.disponible())
+try:
+    asyncio.run(cad_anac.pedir("u", None, "GetPagedList"))
+    check("apagado, no se le pide nada a ANAC", False)
+except cad_anac.ModoApagado:
+    check("apagado, no se le pide nada a ANAC", True)
+settings.cad_desde_vector = True
 
 print(f"\n{sum(resultados)}/{len(resultados)}")
 sys.exit(0 if all(resultados) else 1)

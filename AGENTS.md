@@ -1782,3 +1782,16 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado. Falta el primer login real por el proxy nuevo.
 
 **Verificación:** desde el VPS, `curl -x` por el proxy: el login de ANAC da 200 en 0,18 s y google.com queda rechazado. `settings.cad_proxy` del backend reiniciado apunta a DefeServer.
+
+### 2026-10-29 12:25 UTC — Claude Code / Opus 5.5 — "Desde Vector" apagado: ANAC bloqueó también DefeServer
+
+**Qué cambié:**
+- `src/config.py`: `cad_desde_vector` (`CAD_DESDE_VECTOR`), **apagado por defecto**.
+- `src/services/cad_anac.py`: `disponible()` lo exige, y `_exigir_prendido()` corta antes del login, de `pedir` y de "Crear" (`ModoApagado` → 409).
+- `test_cad_anac.py`: 40 checks (apagado no está disponible ni le pide nada a ANAC).
+
+**Por qué:** a las 12:19 UTC del 2026-10-29 la sesión guardada había vencido y el login por DefeServer dio TimeoutError. Su IP (190.138.43.120) también quedó bloqueada, con sólo 1 login y 7 pedidos la noche anterior, con encabezados de navegador. El VPS (21 h) y amenaba (19 h) seguían bloqueados. El bloqueo no depende de cuántos pedidos se hagan. Federico decidió apagar el modo y hacer una extensión del navegador: los pedidos salen del Chrome del piloto con su sesión, sin contraseña guardada ni IP central. Se descartó imitar la huella de Chrome (TLS, HTTP/2) para que ANAC no detecte el login: es esquivar su protección contra bots.
+
+**Estado:** apagado. Con `disponible: false`, la pantalla del frontend ofrece el marcador, Registrar vuelo no ofrece "Cargarlo en tu CAD" y la sincronización contesta `sin_conexion`. La cuenta guardada de Federico sigue cifrada en `cad_conexiones` hasta que la desconecte. `proxy-anac` sigue corriendo en DefeServer sin uso.
+
+**Verificación:** 40/40 offline.
