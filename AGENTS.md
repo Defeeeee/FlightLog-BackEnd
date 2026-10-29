@@ -1807,3 +1807,10 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 
 **Estado:** hecho; falta aplicar la 038.
 **Verificación:** `import src.app` arranca; 40/40 en `test_cad_anac.py`. El endpoint, sólo contra el backend falso del frontend.
+
+### 2026-10-29 13:52 UTC — Claude Code / Opus 5.5 — Migración 038 aplicada
+
+**Qué cambié:** apliqué `migrations/038_cad_leido.sql` en la base (`profiles.cad_leido_at`).
+**Por qué:** Federico dio el OK. Desde ahora, `POST /cad/conciliar` guarda la hora y la Bitácora y el inicio la muestran.
+**Estado:** terminado.
+**Verificación:** `apply_migration` devolvió éxito. La primera hora real se va a ver cuando Federico abra "Pasar al CAD" con el CAD conectado.
