@@ -12,6 +12,7 @@ horas de apertura de los libros sí. Si un perfil público mostrara un total dis
 del de la pantalla del propio piloto, ninguno de los dos números se creería.
 """
 
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -251,6 +252,39 @@ def resumen_de_vuelo(
     if fecha and flight.get("date"):
         chip["fecha"] = str(flight["date"])[:10]
     return chip or None
+
+
+#: Una navegación de tres horas son mil posiciones; para dibujarla en una tarjeta alcanzan menos.
+RECORRIDO_PUNTOS_MAX = 400
+
+
+def recorrido_publicable(compacto: Optional[Dict[str, Any]], maximo: int = RECORRIDO_PUNTOS_MAX) -> Optional[Dict[str, Any]]:
+    """
+    El recorrido ADS-B de un vuelo (`vuelo_recorridos`) para una publicación: **sólo la forma**.
+
+    Sin horas (ni `t0` ni los segundos) y sin velocidad: el piloto eligió mostrar por dónde
+    voló, no a qué hora. La fecha va aparte, con su propio interruptor. Lat y lon a 4
+    decimales (unos 11 m) y la altura de a 100 ft, que es lo que se ve en un mapa chico.
+
+    Los cortes de señal de más de un minuto se marcan **antes** de sacar las horas, para que la
+    publicación los dibuje punteados como la tarjeta del vuelo: `cortes` son los índices de los
+    puntos a los que se llega después de un corte.
+    """
+    p = (compacto or {}).get("p") or []
+    if len(p) < 2:
+        return None
+    paso = max(1, math.ceil(len(p) / maximo))
+    indices = list(range(0, len(p), paso))
+    if indices[-1] != len(p) - 1:
+        indices.append(len(p) - 1)
+    puntos: List[List[float]] = []
+    cortes: List[int] = []
+    for k, i in enumerate(indices):
+        _, lat, lon, alt, _vel = p[i]
+        puntos.append([round(float(lat), 4), round(float(lon), 4), int(round(_n(alt) / 100) * 100)])
+        if k and any(p[m][0] - p[m - 1][0] > 60 for m in range(indices[k - 1] + 1, i + 1)):
+            cortes.append(k)
+    return {"p": puntos, "cortes": cortes, "fuente": (compacto or {}).get("fuente") or "adsb.fi"}
 
 
 def validar_publicacion(texto: Optional[str], n_fotos: int, tiene_vuelo: bool) -> Optional[str]:

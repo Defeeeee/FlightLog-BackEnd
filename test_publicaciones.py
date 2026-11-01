@@ -13,7 +13,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from src.models.social import PilotoResumen, ReporteIn, SuscripcionPushIn
+from src.models.social import PilotoResumen, ReporteIn, SuscripcionPushIn, VueloChip
 from src.services import avisos, firmas, imagenes, social
 
 
@@ -104,6 +104,24 @@ def main() -> bool:
                 social.resumen_de_vuelo(vuelo, avion) == {"ruta": "SADF → SAAR", "duracion": 1.5})
     ok &= check("todo apagado no deja chip",
                 social.resumen_de_vuelo(vuelo, avion, ruta=False, duracion=False) is None)
+    # ------------------------------------------------------- el recorrido
+    comp = {"t0": 1793906820, "fuente": "adsb.fi",
+            "p": [[i * 10, -34.45123 + i * 0.001, -58.58987, 300 + i * 13, 95] for i in range(1000)]}
+    comp["p"][600][0] += 200  # un corte de señal de más de un minuto
+    forma = social.recorrido_publicable(comp)
+    ok &= check("el recorrido publicado no lleva horas ni velocidad",
+                "t0" not in forma and all(len(x) == 3 for x in forma["p"]) and "1793906820" not in str(forma))
+    ok &= check("como mucho 400 puntos, con el primero y el último",
+                len(forma["p"]) <= social.RECORRIDO_PUNTOS_MAX + 1
+                and forma["p"][0][:2] == [-34.4512, -58.5899] and forma["p"][-1][0] == round(-34.45123 + 0.999, 4))
+    ok &= check("lat y lon a 4 decimales, la altura de a 100 ft",
+                all(round(x[0], 4) == x[0] and x[2] % 100 == 0 for x in forma["p"]))
+    ok &= check("el corte de señal sigue marcado", len(forma["cortes"]) == 1)
+    ok &= check("la fuente se cita", forma["fuente"] == "adsb.fi")
+    ok &= check("sin posiciones no hay recorrido",
+                social.recorrido_publicable(None) is None and social.recorrido_publicable({"p": [[0, 1, 2, 3, 4]]}) is None)
+    ok &= check("un chip con recorrido valida", VueloChip(**{"ruta": "SADF · local", "recorrido": forma}).recorrido is not None)
+
     ok &= check("un vuelo local se dice local", social.ruta_legible("SADF SADF") == "SADF · local")
     ok &= check("acepta guiones y flechas", social.ruta_legible("sadf-saar") == "SADF → SAAR")
     ok &= check("un simulador no tiene ruta", social.ruta_legible("LOCAL") is None)

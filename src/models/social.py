@@ -160,6 +160,14 @@ class FotoOut(BaseModel):
     alto: int
 
 
+class RecorridoPublicado(BaseModel):
+    """La forma del recorrido ADS-B, sin horas ni velocidad (`recorrido_publicable`)."""
+
+    p: List[List[float]]
+    cortes: List[int] = []
+    fuente: str = "adsb.fi"
+
+
 class VueloChip(BaseModel):
     """Lo que el piloto eligió mostrar de un vuelo. Nunca la matrícula."""
 
@@ -167,6 +175,7 @@ class VueloChip(BaseModel):
     duracion: Optional[float] = None
     aeronave: Optional[str] = None
     fecha: Optional[str] = None
+    recorrido: Optional[RecorridoPublicado] = None
 
 
 class PublicacionOut(BaseModel):

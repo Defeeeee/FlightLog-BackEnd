@@ -55,6 +55,7 @@ from src.services.social import (
     FOTOS_MAX,
     PUBLICACIONES_POR_DIA,
     ordenar_actividad,
+    recorrido_publicable,
     resumen_de_vuelo,
     url_avatar,
     validar_comentario,
@@ -337,7 +338,8 @@ class PublicacionesController(Controller):
     ) -> PublicacionOut:
         """
         Texto, hasta cuatro fotos y, si el piloto quiere, un vuelo suyo con los datos que
-        prendió (`mostrar_ruta`, `mostrar_duracion`, `mostrar_aeronave`, `mostrar_fecha`).
+        prendió (`mostrar_ruta`, `mostrar_duracion`, `mostrar_aeronave`, `mostrar_fecha` y, si
+        el vuelo tiene recorrido ADS-B guardado, `mostrar_recorrido`: su forma, sin horas).
 
         Las fotos van en campos `foto_0`…`foto_3` y no en uno repetido: el parseo de un
         campo repetido en multipart depende de la versión, y un nombre por foto no.
@@ -348,6 +350,7 @@ class PublicacionesController(Controller):
         vuelo_id = str(data.get("vuelo_id") or "").strip() or None
         archivos = [data[f"foto_{i}"] for i in range(FOTOS_MAX + 2) if isinstance(data.get(f"foto_{i}"), UploadFile)]
         interruptores = {k: _flag(data.get(f"mostrar_{k}")) for k in ("ruta", "duracion", "aeronave", "fecha")}
+        con_recorrido = _flag(data.get("mostrar_recorrido"))
 
         motivo = validar_publicacion(texto, len(archivos), bool(vuelo_id))
         if motivo:
@@ -383,6 +386,17 @@ class PublicacionesController(Controller):
                     r = cliente.table("aircraft").select("type").eq("id", vuelo[0]["aircraft_id"]).limit(1).execute()
                     avion = r.data[0] if r.data else None
                 chip = resumen_de_vuelo(vuelo[0], avion, **interruptores)
+                if con_recorrido:
+                    # `vuelo_recorridos` es sólo del service role (migración 035): que el vuelo
+                    # es del piloto ya lo dijo la consulta de arriba, con su cliente.
+                    guardado = (
+                        SupabaseManager.get_service_client().table("vuelo_recorridos").select("recorrido")
+                        .eq("flight_id", vuelo_id).limit(1).execute().data or []
+                    )
+                    forma = recorrido_publicable(guardado[0]["recorrido"]) if guardado else None
+                    if not forma:
+                        raise HTTPException(status_code=400, detail="Ese vuelo no tiene recorrido grabado.")
+                    chip = {**(chip or {}), "recorrido": forma}
                 # Un vuelo con todos los datos apagados no muestra nada: sin texto ni
                 # fotos, la publicación saldría vacía.
                 if chip is None and not texto and not fotos:

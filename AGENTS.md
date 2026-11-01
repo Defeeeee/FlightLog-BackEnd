@@ -1814,3 +1814,17 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Por qué:** Federico dio el OK. Desde ahora, `POST /cad/conciliar` guarda la hora y la Bitácora y el inicio la muestran.
 **Estado:** terminado.
 **Verificación:** `apply_migration` devolvió éxito. La primera hora real se va a ver cuando Federico abra "Pasar al CAD" con el CAD conectado.
+
+### 2026-11-01 21:40 UTC — Claude Code / Opus 5.5 — El recorrido ADS-B en una publicación
+
+**Qué cambié:**
+- `services/social.py`: `recorrido_publicable(compacto)`: la forma del recorrido guardado (`vuelo_recorridos`) para una publicación. Lat y lon a 4 decimales, la altura de a 100 ft, como mucho `RECORRIDO_PUNTOS_MAX` (400) puntos, y los cortes de señal de más de un minuto marcados (`cortes`). **Sin horas ni velocidad.**
+- `models/social.py`: `RecorridoPublicado` y `VueloChip.recorrido`.
+- `controllers/publicaciones.py`: `POST /publicaciones` acepta `mostrar_recorrido`. Que el vuelo es del piloto lo dice la consulta con su cliente; el recorrido se lee con el service role (la 035 lo deja sólo a él). Si lo pide y el vuelo no tiene recorrido guardado: 400. Va dentro de la columna `vuelo` (jsonb): **sin migración**.
+- `test_publicaciones.py`: siete checks del recorrido.
+
+**Por qué:** era el pendiente "el mapa en la publicación de la red", y Federico pidió hacerlo (2026-11-01). Las horas se sacan porque el piloto elige mostrar por dónde voló, no a qué hora: con la hora exacta, el recorrido se cruza con cualquier web de ADS-B y aparece la matrícula, que la red nunca publica. La fecha sigue siendo su propio interruptor. Se descartó guardar el recorrido entero: una navegación de tres horas son mil puntos y una tarjeta del feed no los necesita.
+
+**Estado:** terminado. El frontend (2.37.0) agrega el interruptor "Recorrido" en el composer, que arranca apagado.
+
+**Verificación:** `test_publicaciones.py` (Todo OK) y el import del controlador. Publicar de verdad, contra la base, no se probó: el backend falso del frontend no tiene publicaciones.
