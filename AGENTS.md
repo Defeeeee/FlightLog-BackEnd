@@ -1828,3 +1828,15 @@ La validación rechaza `x; rm -rf ~`, `|` y vacío.
 **Estado:** terminado. El frontend (2.37.0) agrega el interruptor "Recorrido" en el composer, que arranca apagado.
 
 **Verificación:** `test_publicaciones.py` (Todo OK) y el import del controlador. Publicar de verdad, contra la base, no se probó: el backend falso del frontend no tiene publicaciones.
+
+### 2026-11-01 22:17 UTC — Claude Code / Opus 5.5 — La auditoría no le pide PIC/SIC a un simulador
+
+**Qué cambié:**
+- `services/audit_engine.py`: `_rule_inconsistent_total` saltea las sesiones de simulador (avión con `is_simulator`): sus horas van en `Sim Instructor` / `Sim Pil en Inst`, no en PIC/SIC. De una sesión sólo se marca que no tenga horas de simulador. `recalculate_for_user` lee `is_simulator` del Hangar.
+- `test_audit_engine.py`: tres checks (la sesión sin PIC/SIC no se marca, la sesión sin horas de simulador sí, el mismo renglón en un avión sigue pidiendo el desglose).
+
+**Por qué:** Federico editó una sesión de simulador para ponerle la autoridad certificante y la auditoría le avisó que no tenía desglose PIC/SIC. Un simulador no es un vuelo (invariante 4 del frontend) y no cuenta para PIC. Sus dos sesiones tienen las horas en `Sim Pil en Inst`. Se descartó comparar las horas de simulador con `duration`: una de sus sesiones tiene `duration` 0 con 1,0 h de simulador, y eso habría sumado un aviso nuevo sobre un dato que no se tocó.
+
+**Estado:** terminado. El hallazgo que ya estaba guardado se borra en el próximo recálculo: al editar un vuelo o con "Recalcular" en la Auditoría.
+
+**Verificación:** `test_audit_engine.py` (Todo OK). En la base, sus dos sesiones de simulador tienen las horas en `Sim Pil en Inst` y 0 en PIC/SIC.

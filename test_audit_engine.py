@@ -253,6 +253,25 @@ def main() -> bool:
         derived_expiries.derived_expiry(date(2026, 8, 1), 60) == date(2026, 9, 30),
     )
 
+    # Un simulador no lleva PIC/SIC: sus horas van en las columnas de simulador.
+    hangar_sim = HANGAR + [{"id": "s1", "is_simulator": True}]
+    sesion = {k: 0 for k in engine.PIC_SIC_COLUMNS}
+    sesion.update(id="s", aircraft_id="s1", duration=1.0, **{"Sim Pil en Inst": 1.0})
+    ok &= check(
+        "una sesión de simulador sin PIC/SIC no se marca",
+        rules_for(engine.evaluate([flight(**sesion)], hangar_sim)) == set(),
+    )
+    sin_horas = dict(sesion, **{"Sim Pil en Inst": 0})
+    marcadas = engine.evaluate([flight(**sin_horas)], hangar_sim)
+    ok &= check(
+        "una sesión de simulador sin horas de simulador sí",
+        rules_for(marcadas) == {engine.RULE_INCONSISTENT_TOTAL} and "simulador" in marcadas[0].message,
+    )
+    ok &= check(
+        "el mismo renglón en un avión sigue pidiendo el desglose",
+        rules_for(engine.evaluate([flight(**dict(sesion, aircraft_id="a1"))], hangar_sim)) == {engine.RULE_INCONSISTENT_TOTAL},
+    )
+
     print("\n" + ("Todo OK" if ok else "Hay checks fallando"))
     return bool(ok)
 

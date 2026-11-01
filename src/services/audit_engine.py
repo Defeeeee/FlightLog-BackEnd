@@ -34,6 +34,9 @@ PIC_SIC_COLUMNS = (
     "sic_night_tra",
 )
 
+#: Las horas de una sesión de simulador van en sus propias columnas, no en PIC/SIC.
+SIM_COLUMNS = ("Sim Instructor", "Sim Pil en Inst")
+
 RULE_OVERLAP = "overlap"
 RULE_UNREGISTERED_AIRCRAFT = "unregistered_aircraft"
 RULE_DUPLICATE = "duplicate"
@@ -124,7 +127,8 @@ def evaluate(flights: List[Dict[str, Any]], aircraft: List[Dict[str, Any]]) -> L
     findings.extend(_rule_overlap(flights, duplicate_pairs))
     findings.extend(_rule_unregistered_aircraft(flights, aircraft))
     findings.extend(_rule_duplicate(duplicate_groups))
-    findings.extend(_rule_inconsistent_total(flights))
+    simuladores = {str(a["id"]) for a in aircraft if a.get("is_simulator")}
+    findings.extend(_rule_inconsistent_total(flights, simuladores))
     return findings
 
 
@@ -262,7 +266,7 @@ def _rule_duplicate(groups: List[List[Dict[str, Any]]]) -> List[Finding]:
     return findings
 
 
-def _rule_inconsistent_total(flights: List[Dict[str, Any]]) -> List[Finding]:
+def _rule_inconsistent_total(flights: List[Dict[str, Any]], simuladores: frozenset | set = frozenset()) -> List[Finding]:
     """
     PIC/SIC breakdown that doesn't add up to the flight time.
 
@@ -270,10 +274,30 @@ def _rule_inconsistent_total(flights: List[Dict[str, Any]]) -> List[Finding]:
     retroactively is the other half: flights imported or logged before the
     breakdown existed, where the categories sum to less than the total and the
     hours silently don't appear in any ANAC column.
+
+    **A simulator session is not a flight** (invariante 4 del frontend): its hours go in
+    `Sim Instructor` / `Sim Pil en Inst`, never in PIC/SIC. Asking it for a PIC breakdown
+    flagged every simulator session the moment it was edited (Federico, 2026-11-01). The
+    only thing checked there is that the session has simulator hours at all.
     """
     findings: List[Finding] = []
 
     for flight in flights:
+        if str(flight.get("aircraft_id")) in simuladores:
+            if float(flight.get("duration") or 0) > 0 and sum(float(flight.get(c) or 0) for c in SIM_COLUMNS) <= TOLERANCE_HOURS:
+                findings.append(
+                    Finding(
+                        flight_id=str(flight["id"]),
+                        rule_type=RULE_INCONSISTENT_TOTAL,
+                        severity=SEVERITY_WARNING,
+                        message=(
+                            f"La sesión de simulador del {_pretty_date(flight)} no tiene horas de simulador "
+                            "(como instructor o como piloto en instrucción). Esas horas no computan en ninguna columna."
+                        ),
+                    )
+                )
+            continue
+
         total = float(flight.get("duration") or 0)
         if total <= 0:
             continue
@@ -375,7 +399,7 @@ def recalculate_for_user(supabase_client, user_id: str) -> Dict[str, int]:
     it saves.
     """
     flights_resp = supabase_client.table("flights").select("*").eq("user_id", user_id).execute()
-    aircraft_resp = supabase_client.table("aircraft").select("id").eq("user_id", user_id).execute()
+    aircraft_resp = supabase_client.table("aircraft").select("id,is_simulator").eq("user_id", user_id).execute()
 
     findings = evaluate(flights_resp.data or [], aircraft_resp.data or [])
     return sync_findings(supabase_client, user_id, findings)
